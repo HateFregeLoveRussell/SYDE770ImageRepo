@@ -1,4 +1,8 @@
 [core]
-    remote = gdrive_archive
+    remote = r2_storage
 ['remote "gdrive_archive"']
     url = gdrive://1gO7OH0tewDzBMeXm3UN0Iz3ZeqI5WWc5
+['remote "r2_storage"']
+    url = s3://syde770-image-repository
+    endpointurl = https://22bae42efcbc1e95a09a0a7a1aad9733.r2.cloudflarestorage.com
+    region = us-east-1
