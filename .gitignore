@@ -2,3 +2,5 @@
 credentials.json   
 r2_credentials.json
 gdrive_credentials.json
+.label_studio_venv
+.dvc_venv
