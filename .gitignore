@@ -4,3 +4,6 @@ r2_credentials.json
 gdrive_credentials.json
 .label_studio_venv
 .dvc_venv
+setup_label_studio_env_vars.sh
+.idea
+label_studio_cred.json
