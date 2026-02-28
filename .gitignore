@@ -7,3 +7,4 @@ gdrive_credentials.json
 setup_label_studio_env_vars.sh
 .idea
 label_studio_cred.json
+archive/
