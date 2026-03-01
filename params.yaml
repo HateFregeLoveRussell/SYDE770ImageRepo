@@ -1,0 +1,30 @@
+cache:
+  size_mode: max-side     # max-side | short-side
+  target: 512
+  format: jpg
+  jpeg_quality: 92
+  resample: lanczos
+  exif_orient: true
+
+embeddings:
+  batch_size: 32
+  num_workers: 8
+  # Pick sensible defaults:
+  dinov2_model: dinov2-vitl14-torch
+  clip_model: open-clip-torch
+  write_to_fo: true
+  clip_model_size: Large
+  dinov2_model_size: Large
+
+umap:
+  n_neighbors: 200
+  min_dist: 0.05
+  metric: cosine
+  seed: 42
+  normalize: l2
+
+fiftyone:
+  dataset: th_cups_v1
+  label_field: ground_truth
+  dinov2_field: emb_dinov2
+  clip_field: emb_clip

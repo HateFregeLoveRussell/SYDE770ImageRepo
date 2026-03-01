@@ -1,0 +1,172 @@
+stages:
+  build_fiftyone_dataset:
+    cmd: >
+      python build_fiftyone_dataset.py
+      --samples data/index/samples.parquet
+      --detections data/index/detections.parquet
+      --images-root data
+      --dataset ${fiftyone.dataset}
+      --field ${fiftyone.label_field}
+      --overwrite
+      --persistent
+      --skip-missing-images
+    deps:
+      - build_fiftyone_dataset.py
+      - data/index/samples.parquet
+      - data/index/detections.parquet
+      - data/images
+    params:
+      - fiftyone.dataset
+      - fiftyone.label_field
+
+  cache_resize_images:
+    cmd: >
+      python cache_resize_images.py
+      --samples data/index/samples.parquet
+      --images-root data
+      --cache-root .personal_cache/resized_${cache.target}
+      --${cache.size_mode} ${cache.target}
+      --format ${cache.format}
+      --jpeg-quality ${cache.jpeg_quality}
+      --resample ${cache.resample}
+      --exif-orient
+      --skip-missing
+      --manifest-out data/derived/cache/cache_manifest_${cache.target}.parquet
+    deps:
+      - cache_resize_images.py
+      - data/index/samples.parquet
+      - data/images
+    outs:
+      - data/derived/cache/cache_manifest_${cache.target}.parquet
+    params:
+      - cache.size_mode
+      - cache.target
+      - cache.format
+      - cache.jpeg_quality
+      - cache.resample
+      - cache.exif_orient
+
+  compute_embeddings:
+    cmd: >
+      python compute_embeddings_fo.py
+      --dataset ${fiftyone.dataset}
+      --cache-manifest data/derived/cache/cache_manifest_${cache.target}.parquet
+      --out-dir data/derived/embeddings
+      --dinov2-model ${embeddings.dinov2_model}
+      --clip-model ${embeddings.clip_model}
+      --dinov2-field ${fiftyone.dinov2_field}
+      --clip-field ${fiftyone.clip_field}
+      --batch-size ${embeddings.batch_size}
+      --num-workers ${embeddings.num_workers}
+      --write-to-fo ${embeddings.write_to_fo}
+      --overwrite-parquet
+    deps:
+      - compute_embeddings_fo.py
+      - data/derived/cache/cache_manifest_${cache.target}.parquet
+    outs:
+      - data/derived/embeddings/dinov2_embeddings.parquet
+      - data/derived/embeddings/clip_embeddings.parquet
+    params:
+      - embeddings.batch_size
+      - embeddings.num_workers
+      - embeddings.dinov2_model
+      - embeddings.clip_model
+      - embeddings.write_to_fo
+      - fiftyone.dataset
+      - fiftyone.dinov2_field
+      - fiftyone.clip_field
+  umap_dinov2:
+    cmd: >
+      python compute_umap.py
+      --embeddings data/derived/embeddings/dinov2_embeddings.parquet
+      --out data/derived/umap/dinov2_umap.parquet
+      --n-neighbors ${umap.n_neighbors}
+      --min-dist ${umap.min_dist}
+      --metric ${umap.metric}
+      --seed ${umap.seed}
+      --normalize ${umap.normalize}
+      --overwrite
+    deps:
+      - compute_umap.py
+      - data/derived/embeddings/dinov2_embeddings.parquet
+    outs:
+      - data/derived/umap/dinov2_umap.parquet
+    params:
+      - umap.n_neighbors
+      - umap.min_dist
+      - umap.metric
+      - umap.seed
+      - umap.normalize
+
+  umap_clip:
+    cmd: >
+      python compute_umap.py
+      --embeddings data/derived/embeddings/clip_embeddings.parquet
+      --out data/derived/umap/clip_umap.parquet
+      --n-neighbors ${umap.n_neighbors}
+      --min-dist ${umap.min_dist}
+      --metric ${umap.metric}
+      --seed ${umap.seed}
+      --normalize ${umap.normalize}
+      --overwrite
+    deps:
+      - compute_umap.py
+      - data/derived/embeddings/clip_embeddings.parquet
+    outs:
+      - data/derived/umap/clip_umap.parquet
+    params:
+      - umap.n_neighbors
+      - umap.min_dist
+      - umap.metric
+      - umap.seed
+      - umap.normalize
+
+  # Optional: create Brain visualizations for the App (Embeddings panel)
+  # This writes into the FiftyOne DB, not files, so treat as "analysis stage"
+  brain_umap_clip:
+    cmd: >
+      python compute_brain_visualisation.py
+      --dataset ${fiftyone.dataset}
+      --embeddings-field ${fiftyone.clip_field}
+      --method umap
+      --brain-key umap_clip_cache${cache.target}_${embeddings.clip_model_size}
+      --metric ${umap.metric}
+      --seed ${umap.seed}
+      --n-neighbors ${umap.n_neighbors}
+      --min-dist ${umap.min_dist}
+      --overwrite
+    deps:
+      - compute_brain_visualisation.py
+    params:
+      - fiftyone.dataset
+      - fiftyone.clip_field
+      - cache.target
+      - embeddings.clip_model
+      - umap.n_neighbors
+      - umap.min_dist
+      - umap.metric
+      - umap.seed
+
+  brain_umap_dinov2:
+    cmd: >
+      python compute_brain_visualisation.py
+      --dataset ${fiftyone.dataset}
+      --embeddings-field ${fiftyone.dinov2_field}
+      --method umap
+      --brain-key umap_dinov2_cache${cache.target}_${embeddings.dinov2_model_size}
+      --metric ${umap.metric}
+      --seed ${umap.seed}
+      --n-neighbors ${umap.n_neighbors}
+      --min-dist ${umap.min_dist}
+      --overwrite
+    deps:
+      - compute_brain_visualisation.py
+    params:
+      - fiftyone.dataset
+      - fiftyone.dinov2_field
+      - cache.target
+      - embeddings.dinov2_model
+      - umap.n_neighbors
+      - umap.min_dist
+      - umap.metric
+      - umap.seed

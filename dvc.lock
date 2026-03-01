@@ -1,0 +1,180 @@
+schema: '2.0'
+stages:
+  build_fiftyone_dataset:
+    cmd: "python build_fiftyone_dataset.py --samples data/index/samples.parquet --detections
+      data/index/detections.parquet --images-root data --dataset th_cups_v1 --field
+      ground_truth --overwrite --persistent --skip-missing-images\n"
+    deps:
+    - path: build_fiftyone_dataset.py
+      hash: md5
+      md5: fb1f678fe3aa30e48108544b367b2a95
+      size: 6974
+    - path: data/images
+      hash: md5
+      md5: 952c0ca00abd3f49f7255bab7b1f0a52.dir
+      size: 3629478535
+      nfiles: 2533
+    - path: data/index/detections.parquet
+      hash: md5
+      md5: 87389d017ae1e6851f2e877c041bfbcc
+      size: 338084
+    - path: data/index/samples.parquet
+      hash: md5
+      md5: e3cfd3cf88c3b0583571c289ab853e63
+      size: 314484
+    params:
+      params.yaml:
+        fiftyone.dataset: th_cups_v1
+        fiftyone.label_field: ground_truth
+  cache_resize_images:
+    cmd: "python cache_resize_images.py --samples data/index/samples.parquet --images-root
+      data --cache-root .personal_cache/resized_512 --max-side 512 --format jpg --jpeg-quality
+      92 --resample lanczos --exif-orient --skip-missing --manifest-out data/derived/cache/cache_manifest_512.parquet\n"
+    deps:
+    - path: cache_resize_images.py
+      hash: md5
+      md5: 44034de36fdd71ea5755c07c6c57212b
+      size: 10025
+    - path: data/images
+      hash: md5
+      md5: 952c0ca00abd3f49f7255bab7b1f0a52.dir
+      size: 3629478535
+      nfiles: 2533
+    - path: data/index/samples.parquet
+      hash: md5
+      md5: e3cfd3cf88c3b0583571c289ab853e63
+      size: 314484
+    params:
+      params.yaml:
+        cache.exif_orient: true
+        cache.format: jpg
+        cache.jpeg_quality: 92
+        cache.resample: lanczos
+        cache.size_mode: max-side
+        cache.target: 512
+    outs:
+    - path: data/derived/cache/cache_manifest_512.parquet
+      hash: md5
+      md5: 6901b2abaa7b1f444c2afe5d483c64e8
+      size: 170186
+  compute_embeddings:
+    cmd: "python compute_embeddings_fo.py --dataset th_cups_v1 --cache-manifest data/derived/cache/cache_manifest_512.parquet
+      --out-dir data/derived/embeddings --dinov2-model dinov2-vitl14-torch --clip-model
+      open-clip-torch --dinov2-field emb_dinov2 --clip-field emb_clip --batch-size
+      32 --num-workers 8 --write-to-fo true --overwrite-parquet\n"
+    deps:
+    - path: compute_embeddings_fo.py
+      hash: md5
+      md5: e523901b21fe26de17da66c67abcc361
+      size: 10426
+    - path: data/derived/cache/cache_manifest_512.parquet
+      hash: md5
+      md5: 6901b2abaa7b1f444c2afe5d483c64e8
+      size: 170186
+    params:
+      params.yaml:
+        embeddings.batch_size: 32
+        embeddings.clip_model: open-clip-torch
+        embeddings.dinov2_model: dinov2-vitl14-torch
+        embeddings.num_workers: 8
+        embeddings.write_to_fo: true
+        fiftyone.clip_field: emb_clip
+        fiftyone.dataset: th_cups_v1
+        fiftyone.dinov2_field: emb_dinov2
+    outs:
+    - path: data/derived/embeddings/clip_embeddings.parquet
+      hash: md5
+      md5: 3114c76cf07886c0ad50c471b85f6c69
+      size: 8303048
+    - path: data/derived/embeddings/dinov2_embeddings.parquet
+      hash: md5
+      md5: 79abaef757df2a9a82019d15d63564d2
+      size: 16268812
+  umap_dinov2:
+    cmd: "python compute_umap.py --embeddings data/derived/embeddings/dinov2_embeddings.parquet
+      --out data/derived/umap/dinov2_umap.parquet --n-neighbors 200 --min-dist 0.05
+      --metric cosine --seed 42 --normalize l2 --overwrite\n"
+    deps:
+    - path: compute_umap.py
+      hash: md5
+      md5: eee989ffae88c8cdb2588ebee28b39bb
+      size: 7221
+    - path: data/derived/embeddings/dinov2_embeddings.parquet
+      hash: md5
+      md5: 79abaef757df2a9a82019d15d63564d2
+      size: 16268812
+    params:
+      params.yaml:
+        umap.metric: cosine
+        umap.min_dist: 0.05
+        umap.n_neighbors: 200
+        umap.normalize: l2
+        umap.seed: 42
+    outs:
+    - path: data/derived/umap/dinov2_umap.parquet
+      hash: md5
+      md5: 6879d46d96ee37990abace51337d865b
+      size: 82236
+  umap_clip:
+    cmd: "python compute_umap.py --embeddings data/derived/embeddings/clip_embeddings.parquet
+      --out data/derived/umap/clip_umap.parquet --n-neighbors 200 --min-dist 0.05
+      --metric cosine --seed 42 --normalize l2 --overwrite\n"
+    deps:
+    - path: compute_umap.py
+      hash: md5
+      md5: eee989ffae88c8cdb2588ebee28b39bb
+      size: 7221
+    - path: data/derived/embeddings/clip_embeddings.parquet
+      hash: md5
+      md5: 3114c76cf07886c0ad50c471b85f6c69
+      size: 8303048
+    params:
+      params.yaml:
+        umap.metric: cosine
+        umap.min_dist: 0.05
+        umap.n_neighbors: 200
+        umap.normalize: l2
+        umap.seed: 42
+    outs:
+    - path: data/derived/umap/clip_umap.parquet
+      hash: md5
+      md5: 3d0e68cb63866ab67eb26f097d0656ae
+      size: 82212
+  brain_umap_clip:
+    cmd: "python compute_brain_visualisation.py --dataset th_cups_v1 --embeddings-field
+      emb_clip --method umap --brain-key umap_clip_cache512_Large --metric cosine
+      --seed 42 --n-neighbors 200 --min-dist 0.05 --overwrite\n"
+    deps:
+    - path: compute_brain_visualisation.py
+      hash: md5
+      md5: 382177b5be6118ae087a0332c6a8283c
+      size: 4367
+    params:
+      params.yaml:
+        cache.target: 512
+        embeddings.clip_model: open-clip-torch
+        fiftyone.clip_field: emb_clip
+        fiftyone.dataset: th_cups_v1
+        umap.metric: cosine
+        umap.min_dist: 0.05
+        umap.n_neighbors: 200
+        umap.seed: 42
+  brain_umap_dinov2:
+    cmd: "python compute_brain_visualisation.py --dataset th_cups_v1 --embeddings-field
+      emb_dinov2 --method umap --brain-key umap_dinov2_cache512_Large --metric cosine
+      --seed 42 --n-neighbors 200 --min-dist 0.05 --overwrite\n"
+    deps:
+    - path: compute_brain_visualisation.py
+      hash: md5
+      md5: 382177b5be6118ae087a0332c6a8283c
+      size: 4367
+    params:
+      params.yaml:
+        cache.target: 512
+        embeddings.dinov2_model: dinov2-vitl14-torch
+        fiftyone.dataset: th_cups_v1
+        fiftyone.dinov2_field: emb_dinov2
+        umap.metric: cosine
+        umap.min_dist: 0.05
+        umap.n_neighbors: 200
+        umap.seed: 42
