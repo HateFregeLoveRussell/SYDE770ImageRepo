@@ -20,8 +20,8 @@ stages:
       size: 338084
     - path: data/index/samples.parquet
       hash: md5
-      md5: e3cfd3cf88c3b0583571c289ab853e63
-      size: 314484
+      md5: d117703d23812f0d393f79ffe7d969fb
+      size: 414856
     params:
       params.yaml:
         fiftyone.dataset: th_cups_v1
@@ -42,8 +42,8 @@ stages:
       nfiles: 2533
     - path: data/index/samples.parquet
       hash: md5
-      md5: e3cfd3cf88c3b0583571c289ab853e63
-      size: 314484
+      md5: d117703d23812f0d393f79ffe7d969fb
+      size: 414856
     params:
       params.yaml:
         cache.exif_orient: true
