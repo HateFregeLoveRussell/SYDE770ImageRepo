@@ -20,6 +20,42 @@ import pandas as pd
 import fiftyone as fo
 from datetime import datetime, timezone
 
+import math
+import pandas as pd
+
+def to_str_or_none(v):
+    # Accepts pd.NA / NaN / None
+    if v is None:
+        return None
+    try:
+        # pandas NA handling
+        if pd.isna(v):
+            return None
+    except Exception:
+        pass
+    # Convert everything else to string
+    return str(v)
+
+def to_bool_or_none(v):
+    if v is None:
+        return None
+    try:
+        if pd.isna(v):
+            return None
+    except Exception:
+        pass
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)) and v in (0, 1):
+        return bool(v)
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in ("true", "t", "1", "yes", "y"):
+            return True
+        if s in ("false", "f", "0", "no", "n"):
+            return False
+    # Fall back: don't poison schema
+    return None
 #dumb datetime fix helper
 def parse_dt(v):
     """
@@ -166,11 +202,12 @@ def main():
         s["image_raw"] = str(getattr(row, "image_raw", ""))
 
         # Provenance
-        s["ls_task_id"] = int(getattr(row, "ls_task_id", -1))
+        v = getattr(row, "ls_task_id", None)
+        s["ls_task_id"] = int(v) if v is not None and not pd.isna(v) else None
         s["created_at"] = parse_dt(getattr(row, "created_at", None))
         s["updated_at"] = parse_dt(getattr(row, "updated_at", None))
 
-        # Diagnostics
+        # choice/categorical fields: always strings (or None)
         for field in [
             "type",
             "background",
@@ -181,13 +218,14 @@ def main():
             "occluded",
             "count",
             "brand",
-            "n_det",
-            "n_cup",
-            "computed_cup_percantage",
-            "cup_class",
         ]:
             if hasattr(row, field):
-                s[field] = getattr(row, field)
+                s[field] = to_str_or_none(getattr(row, field))
+
+        # binary fields: booleans (or None)
+        for field in ["lid", "sleeve"]:
+            if hasattr(row, field):
+                s[field] = to_bool_or_none(getattr(row, field))
 
         # Attach detections
         det_list = dets_by_sample.get(sample_id, [])

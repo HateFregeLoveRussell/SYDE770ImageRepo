@@ -7,21 +7,21 @@ stages:
     deps:
     - path: build_fiftyone_dataset.py
       hash: md5
-      md5: fb1f678fe3aa30e48108544b367b2a95
-      size: 6974
+      md5: 346a54775ce205cec2f78357695b2381
+      size: 8005
     - path: data/images
       hash: md5
-      md5: 952c0ca00abd3f49f7255bab7b1f0a52.dir
-      size: 3629478535
-      nfiles: 2533
+      md5: a4284d8a1080669b95d143f74a65559f.dir
+      size: 3940810738
+      nfiles: 2821
     - path: data/index/detections.parquet
       hash: md5
-      md5: 87389d017ae1e6851f2e877c041bfbcc
-      size: 338084
+      md5: 4bebfabb9e25f00943ed79791fb60c85
+      size: 391783
     - path: data/index/samples.parquet
       hash: md5
-      md5: d117703d23812f0d393f79ffe7d969fb
-      size: 414856
+      md5: a93c05e15f92cd65a88fa1c97e8489b8
+      size: 460765
     params:
       params.yaml:
         fiftyone.dataset: th_cups_v1
@@ -37,13 +37,13 @@ stages:
       size: 10025
     - path: data/images
       hash: md5
-      md5: 952c0ca00abd3f49f7255bab7b1f0a52.dir
-      size: 3629478535
-      nfiles: 2533
+      md5: a4284d8a1080669b95d143f74a65559f.dir
+      size: 3940810738
+      nfiles: 2821
     - path: data/index/samples.parquet
       hash: md5
-      md5: d117703d23812f0d393f79ffe7d969fb
-      size: 414856
+      md5: a93c05e15f92cd65a88fa1c97e8489b8
+      size: 460765
     params:
       params.yaml:
         cache.exif_orient: true
@@ -55,8 +55,8 @@ stages:
     outs:
     - path: data/derived/cache/cache_manifest_512.parquet
       hash: md5
-      md5: 6901b2abaa7b1f444c2afe5d483c64e8
-      size: 170186
+      md5: c1710b286c55c42d5084038c109a2512
+      size: 203466
   compute_embeddings:
     cmd: "python compute_embeddings_fo.py --dataset th_cups_v1 --cache-manifest data/derived/cache/cache_manifest_512.parquet
       --out-dir data/derived/embeddings --dinov2-model dinov2-vitl14-torch --clip-model
@@ -69,8 +69,8 @@ stages:
       size: 10426
     - path: data/derived/cache/cache_manifest_512.parquet
       hash: md5
-      md5: 6901b2abaa7b1f444c2afe5d483c64e8
-      size: 170186
+      md5: c1710b286c55c42d5084038c109a2512
+      size: 203466
     params:
       params.yaml:
         embeddings.batch_size: 32
