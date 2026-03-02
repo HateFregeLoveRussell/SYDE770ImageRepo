@@ -55,8 +55,8 @@ stages:
     outs:
     - path: data/derived/cache/cache_manifest_512.parquet
       hash: md5
-      md5: c1710b286c55c42d5084038c109a2512
-      size: 203466
+      md5: 198ef8bdfdb6e23b47f91a5fb1b214c9
+      size: 201437
   compute_embeddings:
     cmd: "python compute_embeddings_fo.py --dataset th_cups_v1 --cache-manifest data/derived/cache/cache_manifest_512.parquet
       --out-dir data/derived/embeddings --dinov2-model dinov2-vitl14-torch --clip-model
@@ -69,8 +69,8 @@ stages:
       size: 10426
     - path: data/derived/cache/cache_manifest_512.parquet
       hash: md5
-      md5: c1710b286c55c42d5084038c109a2512
-      size: 203466
+      md5: 198ef8bdfdb6e23b47f91a5fb1b214c9
+      size: 201437
     params:
       params.yaml:
         embeddings.batch_size: 32
@@ -84,12 +84,12 @@ stages:
     outs:
     - path: data/derived/embeddings/clip_embeddings.parquet
       hash: md5
-      md5: 3114c76cf07886c0ad50c471b85f6c69
-      size: 8303048
+      md5: 33e45778b1fc6ed71ccd6626ddb68a50
+      size: 9217432
     - path: data/derived/embeddings/dinov2_embeddings.parquet
       hash: md5
-      md5: 79abaef757df2a9a82019d15d63564d2
-      size: 16268812
+      md5: 9e5b8c36e3e05a6902a513e44af0cec4
+      size: 18088880
   umap_dinov2:
     cmd: "python compute_umap.py --embeddings data/derived/embeddings/dinov2_embeddings.parquet
       --out data/derived/umap/dinov2_umap.parquet --n-neighbors 200 --min-dist 0.05
@@ -101,8 +101,8 @@ stages:
       size: 7221
     - path: data/derived/embeddings/dinov2_embeddings.parquet
       hash: md5
-      md5: 79abaef757df2a9a82019d15d63564d2
-      size: 16268812
+      md5: 9e5b8c36e3e05a6902a513e44af0cec4
+      size: 18088880
     params:
       params.yaml:
         umap.metric: cosine
@@ -113,8 +113,8 @@ stages:
     outs:
     - path: data/derived/umap/dinov2_umap.parquet
       hash: md5
-      md5: 6879d46d96ee37990abace51337d865b
-      size: 82236
+      md5: dbe0f9987239e4c9b0d5b20035e7e813
+      size: 95099
   umap_clip:
     cmd: "python compute_umap.py --embeddings data/derived/embeddings/clip_embeddings.parquet
       --out data/derived/umap/clip_umap.parquet --n-neighbors 200 --min-dist 0.05
@@ -126,8 +126,8 @@ stages:
       size: 7221
     - path: data/derived/embeddings/clip_embeddings.parquet
       hash: md5
-      md5: 3114c76cf07886c0ad50c471b85f6c69
-      size: 8303048
+      md5: 33e45778b1fc6ed71ccd6626ddb68a50
+      size: 9217432
     params:
       params.yaml:
         umap.metric: cosine
@@ -138,8 +138,8 @@ stages:
     outs:
     - path: data/derived/umap/clip_umap.parquet
       hash: md5
-      md5: 3d0e68cb63866ab67eb26f097d0656ae
-      size: 82212
+      md5: 6025f7efd540faf4c7288b92cffca290
+      size: 95083
   brain_umap_clip:
     cmd: "python compute_brain_visualisation.py --dataset th_cups_v1 --embeddings-field
       emb_clip --method umap --brain-key umap_clip_cache512_Large --metric cosine
