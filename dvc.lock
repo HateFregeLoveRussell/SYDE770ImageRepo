@@ -11,17 +11,17 @@ stages:
       size: 8005
     - path: data/images
       hash: md5
-      md5: a4284d8a1080669b95d143f74a65559f.dir
-      size: 3940810738
-      nfiles: 2821
+      md5: 8bfd0a3dfdb8e8a1a56360c3f42120ed.dir
+      size: 3344991298
+      nfiles: 2371
     - path: data/index/detections.parquet
       hash: md5
-      md5: 4bebfabb9e25f00943ed79791fb60c85
-      size: 391783
+      md5: c7155b10f058d35f14d2729428a2b6a9
+      size: 343523
     - path: data/index/samples.parquet
       hash: md5
-      md5: a93c05e15f92cd65a88fa1c97e8489b8
-      size: 460765
+      md5: 2e50529647018a31733d9a9f5b48fa2b
+      size: 389517
     params:
       params.yaml:
         fiftyone.dataset: th_cups_v1
@@ -37,13 +37,13 @@ stages:
       size: 10025
     - path: data/images
       hash: md5
-      md5: a4284d8a1080669b95d143f74a65559f.dir
-      size: 3940810738
-      nfiles: 2821
+      md5: 8bfd0a3dfdb8e8a1a56360c3f42120ed.dir
+      size: 3344991298
+      nfiles: 2371
     - path: data/index/samples.parquet
       hash: md5
-      md5: a93c05e15f92cd65a88fa1c97e8489b8
-      size: 460765
+      md5: 2e50529647018a31733d9a9f5b48fa2b
+      size: 389517
     params:
       params.yaml:
         cache.exif_orient: true
@@ -55,8 +55,8 @@ stages:
     outs:
     - path: data/derived/cache/cache_manifest_512.parquet
       hash: md5
-      md5: 198ef8bdfdb6e23b47f91a5fb1b214c9
-      size: 201437
+      md5: b67bc238d4e31b2fea4a414f3706d820
+      size: 171353
   compute_embeddings:
     cmd: "python compute_embeddings_fo.py --dataset th_cups_v1 --cache-manifest data/derived/cache/cache_manifest_512.parquet
       --out-dir data/derived/embeddings --dinov2-model dinov2-vitl14-torch --clip-model
@@ -69,8 +69,8 @@ stages:
       size: 10426
     - path: data/derived/cache/cache_manifest_512.parquet
       hash: md5
-      md5: 198ef8bdfdb6e23b47f91a5fb1b214c9
-      size: 201437
+      md5: b67bc238d4e31b2fea4a414f3706d820
+      size: 171353
     params:
       params.yaml:
         embeddings.batch_size: 32
@@ -84,12 +84,12 @@ stages:
     outs:
     - path: data/derived/embeddings/clip_embeddings.parquet
       hash: md5
-      md5: 33e45778b1fc6ed71ccd6626ddb68a50
-      size: 9217432
+      md5: 15c1155a43a381a4ae51d348ad01b1a5
+      size: 7795395
     - path: data/derived/embeddings/dinov2_embeddings.parquet
       hash: md5
-      md5: 9e5b8c36e3e05a6902a513e44af0cec4
-      size: 18088880
+      md5: 8bdb2d26358915b128b4373621aec922
+      size: 15251613
   umap_dinov2:
     cmd: "python compute_umap.py --embeddings data/derived/embeddings/dinov2_embeddings.parquet
       --out data/derived/umap/dinov2_umap.parquet --n-neighbors 200 --min-dist 0.05
@@ -101,8 +101,8 @@ stages:
       size: 7221
     - path: data/derived/embeddings/dinov2_embeddings.parquet
       hash: md5
-      md5: 9e5b8c36e3e05a6902a513e44af0cec4
-      size: 18088880
+      md5: 8bdb2d26358915b128b4373621aec922
+      size: 15251613
     params:
       params.yaml:
         umap.metric: cosine
@@ -113,8 +113,8 @@ stages:
     outs:
     - path: data/derived/umap/dinov2_umap.parquet
       hash: md5
-      md5: dbe0f9987239e4c9b0d5b20035e7e813
-      size: 95099
+      md5: fbe408239412421a956711a66f2234ce
+      size: 81199
   umap_clip:
     cmd: "python compute_umap.py --embeddings data/derived/embeddings/clip_embeddings.parquet
       --out data/derived/umap/clip_umap.parquet --n-neighbors 200 --min-dist 0.05
@@ -126,8 +126,8 @@ stages:
       size: 7221
     - path: data/derived/embeddings/clip_embeddings.parquet
       hash: md5
-      md5: 33e45778b1fc6ed71ccd6626ddb68a50
-      size: 9217432
+      md5: 15c1155a43a381a4ae51d348ad01b1a5
+      size: 7795395
     params:
       params.yaml:
         umap.metric: cosine
@@ -138,8 +138,8 @@ stages:
     outs:
     - path: data/derived/umap/clip_umap.parquet
       hash: md5
-      md5: 6025f7efd540faf4c7288b92cffca290
-      size: 95083
+      md5: 08acb320cc7ca07172b4d1a017892ccf
+      size: 81179
   brain_umap_clip:
     cmd: "python compute_brain_visualisation.py --dataset th_cups_v1 --embeddings-field
       emb_clip --method umap --brain-key umap_clip_cache512_Large --metric cosine
