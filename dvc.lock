@@ -11,17 +11,17 @@ stages:
       size: 8005
     - path: data/images
       hash: md5
-      md5: c9f3b987249ca3ffbb6f155d589a6fed.dir
-      size: 3595384563
-      nfiles: 2503
+      md5: d3a6876aba574a830e55078a8b492d29.dir
+      size: 3220611154
+      nfiles: 2203
     - path: data/index/detections.parquet
       hash: md5
-      md5: 8da2f52f173af45491974c85c730a946
-      size: 355758
+      md5: 005abba703eddfaef2e2506e09ed34ba
+      size: 319258
     - path: data/index/samples.parquet
       hash: md5
-      md5: ff5cda211e7522143d43e94a43553fd0
-      size: 399522
+      md5: 8f8c8c9e63395e4881d6864cb98c28ca
+      size: 352744
     params:
       params.yaml:
         fiftyone.dataset: th_cups_v1
