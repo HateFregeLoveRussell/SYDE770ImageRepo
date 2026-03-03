@@ -11,17 +11,17 @@ stages:
       size: 8005
     - path: data/images
       hash: md5
-      md5: d3a6876aba574a830e55078a8b492d29.dir
-      size: 3220611154
-      nfiles: 2203
+      md5: 17ab0f5c20b304f283d0d4411a13f91d.dir
+      size: 2951861498
+      nfiles: 2003
     - path: data/index/detections.parquet
       hash: md5
-      md5: 005abba703eddfaef2e2506e09ed34ba
-      size: 319258
+      md5: d5541add6e12c8a3d1366d850449d75a
+      size: 296636
     - path: data/index/samples.parquet
       hash: md5
-      md5: 8f8c8c9e63395e4881d6864cb98c28ca
-      size: 352744
+      md5: 079cdacf57bc12ca55d240663c99d4e9
+      size: 320373
     params:
       params.yaml:
         fiftyone.dataset: th_cups_v1
@@ -37,13 +37,13 @@ stages:
       size: 10025
     - path: data/images
       hash: md5
-      md5: c9f3b987249ca3ffbb6f155d589a6fed.dir
-      size: 3595384563
-      nfiles: 2503
+      md5: 17ab0f5c20b304f283d0d4411a13f91d.dir
+      size: 2951861498
+      nfiles: 2003
     - path: data/index/samples.parquet
       hash: md5
-      md5: ff5cda211e7522143d43e94a43553fd0
-      size: 399522
+      md5: 079cdacf57bc12ca55d240663c99d4e9
+      size: 320373
     params:
       params.yaml:
         cache.exif_orient: true
@@ -65,12 +65,12 @@ stages:
     deps:
     - path: compute_embeddings_fo.py
       hash: md5
-      md5: 06fbe479ae6a41cf4167cd7eb3e80e59
-      size: 10718
+      md5: e523901b21fe26de17da66c67abcc361
+      size: 10426
     - path: data/derived/cache/cache_manifest_512.parquet
       hash: md5
-      md5: b67bc238d4e31b2fea4a414f3706d820
-      size: 171353
+      md5: 7d3d1a991bce5d0b42d4488ec7d35b01
+      size: 175370
     params:
       params.yaml:
         embeddings.batch_size: 32
@@ -97,8 +97,8 @@ stages:
     deps:
     - path: compute_umap.py
       hash: md5
-      md5: 9ffb0fdcef553ad5f5a15b044f8cf4d1
-      size: 7460
+      md5: eee989ffae88c8cdb2588ebee28b39bb
+      size: 7221
     - path: data/derived/embeddings/dinov2_embeddings.parquet
       hash: md5
       md5: 8bdb2d26358915b128b4373621aec922
@@ -122,8 +122,8 @@ stages:
     deps:
     - path: compute_umap.py
       hash: md5
-      md5: 9ffb0fdcef553ad5f5a15b044f8cf4d1
-      size: 7460
+      md5: eee989ffae88c8cdb2588ebee28b39bb
+      size: 7221
     - path: data/derived/embeddings/clip_embeddings.parquet
       hash: md5
       md5: 15c1155a43a381a4ae51d348ad01b1a5
@@ -147,8 +147,8 @@ stages:
     deps:
     - path: compute_brain_visualisation.py
       hash: md5
-      md5: 4b4a34df5e8fe7c14e1ffda3df92d2dd
-      size: 4509
+      md5: 382177b5be6118ae087a0332c6a8283c
+      size: 4367
     params:
       params.yaml:
         cache.target: 512
@@ -166,8 +166,8 @@ stages:
     deps:
     - path: compute_brain_visualisation.py
       hash: md5
-      md5: 4b4a34df5e8fe7c14e1ffda3df92d2dd
-      size: 4509
+      md5: 382177b5be6118ae087a0332c6a8283c
+      size: 4367
     params:
       params.yaml:
         cache.target: 512
