@@ -1,0 +1,8 @@
+path: ../../..  # root relative to this file (SYDE770ImageRepo/)
+train: data/images  # update with split path when ready
+val: data/images    # update with split path when ready
+
+nc: 2
+names:
+  0: NonTimHortonsCup
+  1: TimHortonsCup
