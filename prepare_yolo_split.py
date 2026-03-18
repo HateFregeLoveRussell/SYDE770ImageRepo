@@ -1,158 +1,250 @@
 """
 prepare_yolo_split.py
 
-Organises the flat YOLO labels into a stratified 80/20 train/val split and
-creates a data.yaml that Ultralytics YOLOv8 can consume directly.
+Creates an 80/20 stratified Train+CV / Test split, then generates k-fold
+cross-validation directories within the 80% portion for Optuna search,
+plus a trainval/ directory for final retraining.
 
 Layout produced:
   data/derived/yolo/
-    images/
-      train/   <- symlinks to data/images/<key>.jpg  (no data duplication)
-      val/
-    labels/
-      train/   <- .txt files moved from the flat labels/ directory
-      val/
-    data.yaml  <- rewritten with absolute paths
+    test/images/  test/labels/        <- held-out 20%
+    folds/fold_0/ ... fold_{k-1}/     <- each fold has data.yaml + train/val
+    trainval/                          <- full 80% for final retraining
+    fold_indices.json                  <- saved fold assignments
+    data.yaml                          <- points to trainval (backward compat)
 """
 
+import argparse
+import json
+import os
 import shutil
+import stat
 import pathlib
+
 import pandas as pd
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold
 
-# ── paths ────────────────────────────────────────────────────────────────────
-REPO_ROOT   = pathlib.Path(__file__).parent.resolve()
-IMAGES_DIR  = REPO_ROOT / "data" / "images"
+REPO_ROOT = pathlib.Path(__file__).parent.resolve()
+IMAGES_DIR = REPO_ROOT / "data" / "images"
 LABELS_FLAT = REPO_ROOT / "data" / "derived" / "yolo" / "labels"
-YOLO_DIR    = REPO_ROOT / "data" / "derived" / "yolo"
-SAMPLES_PQ  = REPO_ROOT / "data" / "index" / "samples.parquet"
-DATA_YAML   = YOLO_DIR / "data.yaml"
+YOLO_DIR = REPO_ROOT / "data" / "derived" / "yolo"
+SAMPLES_PQ = REPO_ROOT / "data" / "index" / "samples.parquet"
 
-SPLITS = ("train", "val")
+def _rm_readonly(func, path, _exc_info):
+    """Handle read-only files on Windows / OneDrive by forcing write permission."""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
 
-# ── helpers ──────────────────────────────────────────────────────────────────
 
-def clean_split_dirs():
-    """Remove any previous train/val directories so we start fresh."""
-    for split in SPLITS:
-        img_dir = YOLO_DIR / "images" / split
-        lbl_dir = YOLO_DIR / "labels" / split
-        for d in (img_dir, lbl_dir):
-            if d.exists():
-                shutil.rmtree(d)
-            d.mkdir(parents=True, exist_ok=True)
-
-# ── main ─────────────────────────────────────────────────────────────────────
-
-def main():
-    # 1. collect all labelled image keys
-    label_files = sorted(LABELS_FLAT.glob("*.txt"))
-    if not label_files:
-        raise FileNotFoundError(f"No .txt files found in {LABELS_FLAT}")
-
-    keys = [f.stem for f in label_files]           # e.g. "-1P1ZHLBxgE_6d945ccd7e68bb31"
-    print(f"Found {len(keys)} labelled images.")
-
-    # 2. load samples.parquet to get stratification column
-    # NOTE: use has_tim_bbox (no nulls, 543 True) — not is_tim_hortons_bbox which has 420 nulls
-    df = pd.read_parquet(SAMPLES_PQ, columns=["image_key", "has_tim_bbox"])
-    # image_key in parquet looks like "images/<stem>.jpg" — strip both parts
-    df["image_key_stem"] = (
-        df["image_key"]
-        .str.replace(r"^images/", "", regex=True)
-        .str.replace(r"\.(jpg|jpeg|png|webp)$", "", regex=True)
-    )
-
-    key_to_tim = dict(zip(df["image_key_stem"], df["has_tim_bbox"]))
-
-    # map each key → Tim Hortons flag (default False if not found)
-    strat_labels = [int(bool(key_to_tim.get(k, False))) for k in keys]
-
-    tim_count     = sum(strat_labels)
-    non_tim_count = len(strat_labels) - tim_count
-    print(f"  Tim Hortons images : {tim_count}  (using has_tim_bbox)")
-    print(f"  Non-Tim Hortons    : {non_tim_count}")
-
-    # 3. stratified 80 / 20 split
-    train_keys, val_keys, train_labels, val_labels = train_test_split(
-        keys,
-        strat_labels,
-        test_size=0.20,
-        random_state=42,
-        stratify=strat_labels,
-    )
-
-    # 4. prepare output directories
-    clean_split_dirs()
-
-    # 5. create symlinks for images + copy label files
-    missing_images = []
-
-    for split, split_keys in (("train", train_keys), ("val", val_keys)):
-        img_out = YOLO_DIR / "images" / split
-        lbl_out = YOLO_DIR / "labels" / split
-
-        for key in split_keys:
-            # -- image symlink --
-            # try common extensions
-            img_src = None
-            for ext in (".jpg", ".jpeg", ".png", ".webp"):
-                candidate = IMAGES_DIR / (key + ext)
-                if candidate.exists():
-                    img_src = candidate
-                    break
-
-            if img_src is None:
-                missing_images.append(key)
-            else:
-                link = img_out / img_src.name
-                if not link.exists():
-                    link.symlink_to(img_src.resolve())
-
-            # -- label file copy --
-            lbl_src = LABELS_FLAT / (key + ".txt")
-            lbl_dst = lbl_out / (key + ".txt")
-            if lbl_src.exists() and not lbl_dst.exists():
-                shutil.copy2(lbl_src, lbl_dst)
-
-    if missing_images:
-        print(f"\nWARNING: {len(missing_images)} label keys had no matching image file.")
-        for k in missing_images[:10]:
-            print(f"  {k}")
-
-    # 6. rewrite data.yaml with absolute path
-    yaml_content = f"""# Auto-generated by prepare_yolo_split.py
-path: {YOLO_DIR}
-train: images/train
-val: images/val
-
+YAML_CLASSES = """\
 nc: 2
 names:
   0: NonTimHortonsCup
   1: TimHortonsCup
 """
-    DATA_YAML.write_text(yaml_content)
-    print(f"\nWrote {DATA_YAML}")
 
-    # 7. sanity-check printout
-    print("\n── Sanity Check ─────────────────────────────────────────────")
-    for split, split_keys, split_strat in (
-        ("train", train_keys, train_labels),
-        ("val",   val_keys,   val_labels),
-    ):
-        img_dir = YOLO_DIR / "images" / split
-        lbl_dir = YOLO_DIR / "labels" / split
-        n_img = len(list(img_dir.iterdir()))
-        n_lbl = len(list(lbl_dir.iterdir()))
-        n_tim = sum(split_strat)
-        n_non = len(split_strat) - n_tim
-        print(f"  {split:5s}  images={n_img}  labels={n_lbl}  "
-              f"Tim={n_tim} ({n_tim/len(split_strat)*100:.1f}%)  "
-              f"NonTim={n_non} ({n_non/len(split_strat)*100:.1f}%)")
-    print("─────────────────────────────────────────────────────────────\n")
-    print("Done! You can now run: python train_yolov8_mlflow.py")
+
+def write_data_yaml(path: pathlib.Path, root: pathlib.Path, train: str, val: str):
+    """Write a YOLO-compatible data.yaml."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"# Auto-generated by prepare_yolo_split.py\n"
+        f"path: {root}\n"
+        f"train: {train}\n"
+        f"val: {val}\n\n"
+        f"{YAML_CLASSES}"
+    )
+
+
+def copy_or_link(src: pathlib.Path, dst: pathlib.Path):
+    """Symlink preferred; falls back to copy on Windows without privileges."""
+    if dst.exists():
+        return
+    try:
+        dst.symlink_to(src.resolve())
+    except OSError:
+        shutil.copy2(src, dst)
+
+
+def find_image(key: str) -> pathlib.Path | None:
+    """Locate the image file for a label key across common extensions."""
+    for ext in (".jpg", ".jpeg", ".png", ".webp"):
+        candidate = IMAGES_DIR / (key + ext)
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def populate_split(
+    keys: list[str], img_dir: pathlib.Path, lbl_dir: pathlib.Path
+) -> list[str]:
+    """Copy/link images and labels into target dirs. Returns missing keys."""
+    img_dir.mkdir(parents=True, exist_ok=True)
+    lbl_dir.mkdir(parents=True, exist_ok=True)
+    missing = []
+    for key in keys:
+        img_src = find_image(key)
+        if img_src is None:
+            missing.append(key)
+        else:
+            copy_or_link(img_src, img_dir / img_src.name)
+
+        lbl_src = LABELS_FLAT / (key + ".txt")
+        lbl_dst = lbl_dir / (key + ".txt")
+        if lbl_src.exists() and not lbl_dst.exists():
+            shutil.copy2(lbl_src, lbl_dst)
+    return missing
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Prepare YOLO data with k-fold CV splits")
+    p.add_argument("--k-folds", type=int, default=5,
+                   help="Number of CV folds (default: 5)")
+    p.add_argument("--seed", type=int, default=42,
+                   help="Random seed for reproducibility (default: 42)")
+    p.add_argument("--test-size", type=float, default=0.20,
+                   help="Fraction held out for test (default: 0.20)")
+    return p.parse_args()
+
+
+def main():
+    args = parse_args()
+    k = args.k_folds
+    seed = args.seed
+
+    # ---- collect labelled keys ------------------------------------------------
+    label_files = sorted(LABELS_FLAT.glob("*.txt"))
+    label_files = [f for f in label_files if f.is_file() and f.parent == LABELS_FLAT]
+    if not label_files:
+        raise FileNotFoundError(f"No .txt label files found in {LABELS_FLAT}")
+
+    keys = [f.stem for f in label_files]
+    print(f"Found {len(keys)} labelled images.")
+
+    # ---- stratification labels ------------------------------------------------
+    df = pd.read_parquet(SAMPLES_PQ, columns=["image_key", "has_tim_bbox"])
+    df["stem"] = (
+        df["image_key"]
+        .str.replace(r"^images/", "", regex=True)
+        .str.replace(r"\.(jpg|jpeg|png|webp)$", "", regex=True)
+    )
+    key_to_tim = dict(zip(df["stem"], df["has_tim_bbox"]))
+    strat = [int(bool(key_to_tim.get(key, False))) for key in keys]
+
+    tim_n = sum(strat)
+    print(f"  Tim Hortons : {tim_n}  |  Non-Tim : {len(strat) - tim_n}")
+
+    # ---- 80/20 stratified split -----------------------------------------------
+    tv_keys, test_keys, tv_strat, test_strat = train_test_split(
+        keys, strat,
+        test_size=args.test_size,
+        random_state=seed,
+        stratify=strat,
+    )
+    print(f"\n  Train+CV : {len(tv_keys)}  |  Test : {len(test_keys)}")
+
+    # ---- clean previous outputs -----------------------------------------------
+    for split in ("train", "val"):
+        for parent in ("images", "labels"):
+            d = YOLO_DIR / parent / split
+            if d.exists():
+                shutil.rmtree(d, onexc=_rm_readonly)
+    for subdir in ("test", "folds", "trainval"):
+        d = YOLO_DIR / subdir
+        if d.exists():
+            shutil.rmtree(d, onexc=_rm_readonly)
+
+    # ---- held-out test set ----------------------------------------------------
+    print("\nPopulating test set...")
+    missing = populate_split(
+        test_keys, YOLO_DIR / "test" / "images", YOLO_DIR / "test" / "labels"
+    )
+    if missing:
+        print(f"  WARNING: {len(missing)} test keys had no matching image")
+
+    write_data_yaml(
+        YOLO_DIR / "test" / "data.yaml",
+        root=YOLO_DIR,
+        train="trainval/images/train",
+        val="test/images",
+    )
+
+    # ---- trainval (full 80%) for final retraining -----------------------------
+    print("Populating trainval (full 80%)...")
+    missing = populate_split(
+        tv_keys,
+        YOLO_DIR / "trainval" / "images" / "train",
+        YOLO_DIR / "trainval" / "labels" / "train",
+    )
+    if missing:
+        print(f"  WARNING: {len(missing)} trainval keys had no matching image")
+
+    write_data_yaml(
+        YOLO_DIR / "trainval" / "data.yaml",
+        root=YOLO_DIR,
+        train="trainval/images/train",
+        val="test/images",
+    )
+
+    # ---- k-fold CV splits -----------------------------------------------------
+    print(f"\nGenerating {k}-fold CV splits...")
+    skf = StratifiedKFold(n_splits=k, shuffle=True, random_state=seed)
+
+    fold_record: dict[str, dict] = {}
+    for fold_i, (train_idx, val_idx) in enumerate(skf.split(tv_keys, tv_strat)):
+        ftrain = [tv_keys[i] for i in train_idx]
+        fval = [tv_keys[i] for i in val_idx]
+
+        fold_dir = YOLO_DIR / "folds" / f"fold_{fold_i}"
+        populate_split(ftrain, fold_dir / "images" / "train", fold_dir / "labels" / "train")
+        populate_split(fval, fold_dir / "images" / "val", fold_dir / "labels" / "val")
+        write_data_yaml(
+            fold_dir / "data.yaml", root=fold_dir, train="images/train", val="images/val"
+        )
+
+        fold_record[f"fold_{fold_i}"] = {"train": ftrain, "val": fval}
+        print(f"  Fold {fold_i}: train={len(ftrain)}, val={len(fval)}")
+
+    # ---- persist fold indices for reproducibility -----------------------------
+    meta = {
+        "seed": seed,
+        "k_folds": k,
+        "test_size": args.test_size,
+        "n_total": len(keys),
+        "n_trainval": len(tv_keys),
+        "n_test": len(test_keys),
+        "test_keys": test_keys,
+        "trainval_keys": tv_keys,
+        "folds": fold_record,
+    }
+    indices_path = YOLO_DIR / "fold_indices.json"
+    indices_path.write_text(json.dumps(meta, indent=2))
+    print(f"\nSaved fold indices -> {indices_path}")
+
+    # ---- legacy data.yaml (backward compat) -----------------------------------
+    write_data_yaml(
+        YOLO_DIR / "data.yaml",
+        root=YOLO_DIR,
+        train="trainval/images/train",
+        val="test/images",
+    )
+    print(f"Wrote {YOLO_DIR / 'data.yaml'}")
+
+    # ---- sanity check ---------------------------------------------------------
+    print("\n-- Sanity Check ---")
+    print(f"  Test      : {len(test_keys)} images  "
+          f"(Tim={sum(test_strat)}, NonTim={len(test_strat) - sum(test_strat)})")
+    print(f"  Train+CV  : {len(tv_keys)} images  "
+          f"(Tim={sum(tv_strat)}, NonTim={len(tv_strat) - sum(tv_strat)})")
+    for fold_i in range(k):
+        fd = YOLO_DIR / "folds" / f"fold_{fold_i}"
+        nt = len(list((fd / "images" / "train").iterdir()))
+        nv = len(list((fd / "images" / "val").iterdir()))
+        print(f"  Fold {fold_i}    : train={nt}, val={nv}")
+    print("-------------------\n")
+    print(f"Done! {k}-fold CV directories ready.")
+    print(f"Next: python optuna_search.py --n-trials 50 --epochs-per-trial 20 --k-folds {k}")
 
 
 if __name__ == "__main__":
     main()
-

@@ -1,31 +1,32 @@
 """
 optuna_search.py
 
-Multi-objective hyperparameter search for YOLOv8 using NSGA-II.
-Optimises two objectives: F1 score and mAP50.
-Each trial trains a short run, logs to MLflow, and the study persists to SQLite.
+Multi-objective hyperparameter search for YOLOv8 using NSGA-II with k-fold
+cross-validation. Each trial trains k folds and optimises mean F1 and mean
+mAP50 across folds.
 
 Usage:
-  python optuna_search.py --n-trials 2  --epochs-per-trial 3          # smoke test
-  python optuna_search.py --n-trials 50 --epochs-per-trial 20 --device cuda
-  python optuna_search.py --n-trials 50 --epochs-per-trial 20 --resume # continue
+  python optuna_search.py --n-trials 1  --epochs-per-trial 2 --k-folds 2   # smoke
+  python optuna_search.py --n-trials 50 --epochs-per-trial 20 --k-folds 5  # full
+  python optuna_search.py --n-trials 50 --epochs-per-trial 20 --k-folds 5 --resume
 """
 
 import argparse
+import csv
 import datetime
 import pathlib
 import platform
 import traceback
 
+import cv2
 import mlflow
+import numpy as np
 import optuna
 import torch
 from ultralytics import YOLO
 
 REPO_ROOT = pathlib.Path(__file__).parent.resolve()
-DATA_YAML = REPO_ROOT / "data" / "derived" / "yolo" / "data.yaml"
-STUDY_DB = REPO_ROOT / "optuna_study.db"
-PARETO_CSV = REPO_ROOT / "pareto_frontier.csv"
+YOLO_DIR = REPO_ROOT / "data" / "derived" / "yolo"
 
 
 def best_device() -> str:
@@ -37,12 +38,12 @@ def best_device() -> str:
 
 
 def safe_key(k: str) -> str:
-    """Sanitise a YOLO metric key for MLflow (no parentheses)."""
+    """Sanitise a YOLO metric key for MLflow (no parentheses/slashes)."""
     return k.replace("(", "").replace(")", "").replace("/", "_")
 
 
 def suggest_hyperparams(trial: optuna.Trial) -> dict:
-    """Sample the full 25-param search space."""
+    """Sample the full 24-param search space."""
     return {
         # training / optimisation
         "lr0": trial.suggest_float("lr0", 1e-5, 1e-1, log=True),
@@ -75,23 +76,33 @@ def suggest_hyperparams(trial: optuna.Trial) -> dict:
     }
 
 
-def run_trial(hp: dict, epochs: int, batch: int, device: str, data: str) -> tuple[float, float]:
-    """Train YOLOv8 with the given hyperparams and return (F1, mAP50)."""
-    model_name = hp.pop("model")
-    imgsz = hp.pop("imgsz")
+def run_fold(
+    hp: dict,
+    epochs: int,
+    batch: int,
+    device: str,
+    data_yaml: str,
+    project: str,
+    trial_num: int,
+    fold_idx: int,
+) -> tuple[float, float]:
+    """Train one fold and return (F1, mAP50)."""
+    model_name = hp["model"]
+    imgsz = hp["imgsz"]
+    train_hp = {k: v for k, v in hp.items() if k not in ("model", "imgsz")}
 
     model = YOLO(model_name)
     results = model.train(
-        data=data,
+        data=data_yaml,
         epochs=epochs,
         imgsz=imgsz,
         batch=batch,
         device=device,
-        project=str(REPO_ROOT / "runs" / "optuna"),
-        name="trial",
+        project=project,
+        name=f"trial_{trial_num}_fold_{fold_idx}",
         exist_ok=True,
         verbose=False,
-        **hp,
+        **train_hp,
     )
 
     rd = results.results_dict if hasattr(results, "results_dict") else {}
@@ -102,7 +113,7 @@ def run_trial(hp: dict, epochs: int, batch: int, device: str, data: str) -> tupl
     return f1, map50
 
 
-def save_pareto(study: optuna.Study):
+def save_pareto(study: optuna.Study, csv_path: pathlib.Path):
     """Write the Pareto frontier trials to CSV."""
     trials = study.best_trials
     if not trials:
@@ -110,44 +121,52 @@ def save_pareto(study: optuna.Study):
 
     rows = []
     for t in trials:
-        row = {"trial": t.number, "f1": t.values[0], "map50": t.values[1]}
+        row = {"trial": t.number, "avg_f1": t.values[0], "avg_map50": t.values[1]}
         row.update(t.params)
         rows.append(row)
 
-    import csv
-    fieldnames = rows[0].keys()
-    with open(PARETO_CSV, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=fieldnames)
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=rows[0].keys())
         w.writeheader()
         w.writerows(rows)
 
-    print(f"\nPareto frontier ({len(rows)} trials) saved to {PARETO_CSV}")
+    print(f"\nPareto frontier ({len(rows)} trials) saved to {csv_path}")
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Optuna multi-objective YOLOv8 search")
+    p = argparse.ArgumentParser(description="Optuna k-fold CV YOLOv8 search")
     p.add_argument("--n-trials", type=int, default=50)
     p.add_argument("--epochs-per-trial", type=int, default=20)
     p.add_argument("--batch", type=int, default=16)
+    p.add_argument("--k-folds", type=int, default=5,
+                   help="Number of CV folds (must match prepare_yolo_split.py)")
     p.add_argument("--device", default=None, help="Force device (cuda/mps/cpu)")
-    p.add_argument("--data", default=str(DATA_YAML))
     p.add_argument("--resume", action="store_true",
-                   help="Load existing study from SQLite instead of creating new")
+                   help="Resume an existing study from SQLite")
     return p.parse_args()
 
 
 def main():
     args = parse_args()
     device = args.device or best_device()
+    k = args.k_folds
 
-    if not pathlib.Path(args.data).exists():
-        raise FileNotFoundError(
-            f"data.yaml not found at {args.data}\n"
-            "Run prepare_yolo_split.py first."
-        )
+    # Validate that fold data.yaml files exist
+    fold_yamls: list[str] = []
+    for i in range(k):
+        p = YOLO_DIR / "folds" / f"fold_{i}" / "data.yaml"
+        if not p.exists():
+            raise FileNotFoundError(
+                f"{p} not found.\n"
+                f"Run: python prepare_yolo_split.py --k-folds {k}"
+            )
+        fold_yamls.append(str(p))
 
-    storage = f"sqlite:///{STUDY_DB}"
-    study_name = "yolov8_nsga2"
+    study_db = REPO_ROOT / f"optuna_study_cv{k}.db"
+    pareto_csv = REPO_ROOT / f"pareto_frontier_cv{k}.csv"
+    storage = f"sqlite:///{study_db}"
+    study_name = f"yolov8_nsga2_cv{k}"
+    project = str(REPO_ROOT / "runs" / f"optuna_cv{k}")
 
     if args.resume:
         study = optuna.load_study(study_name=study_name, storage=storage)
@@ -162,24 +181,26 @@ def main():
         )
 
     mlflow.set_tracking_uri("http://localhost:5000")
-    mlflow.set_experiment("YOLOv8-TimHortons")
+    mlflow.set_experiment(f"YOLOv8-TimHortons-CV{k}")
 
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M")
-    parent_run_name = f"optuna_search_{ts}"
 
     print(f"\n{'='*60}")
     print(f"  Trials  : {args.n_trials}")
     print(f"  Epochs  : {args.epochs_per_trial}")
+    print(f"  Folds   : {k}")
     print(f"  Batch   : {args.batch}")
     print(f"  Device  : {device}")
+    print(f"  Study   : {study_name}")
     print(f"  Storage : {storage}")
     print(f"  Resume  : {args.resume}")
     print(f"{'='*60}\n")
 
-    with mlflow.start_run(run_name=parent_run_name) as parent_run:
+    with mlflow.start_run(run_name=f"optuna_cv{k}_{ts}") as parent_run:
         mlflow.log_params({
             "n_trials": args.n_trials,
             "epochs_per_trial": args.epochs_per_trial,
+            "k_folds": k,
             "batch": args.batch,
             "device": device,
             "sampler": "NSGA-II",
@@ -189,31 +210,57 @@ def main():
             hp = suggest_hyperparams(trial)
 
             with mlflow.start_run(
-                run_name=f"trial_{trial.number}",
-                nested=True,
+                run_name=f"trial_{trial.number}", nested=True
             ):
-                mlflow.log_params({safe_key(k): v for k, v in hp.items()})
+                mlflow.log_params({safe_key(key): v for key, v in hp.items()})
                 mlflow.log_param("trial_number", trial.number)
 
-                try:
-                    f1, map50 = run_trial(
-                        hp.copy(), args.epochs_per_trial, args.batch, device, args.data
-                    )
-                except (RuntimeError, ValueError, OSError):
-                    traceback.print_exc()
-                    f1, map50 = 0.0, 0.0
+                fold_f1s: list[float] = []
+                fold_map50s: list[float] = []
 
-                mlflow.log_metrics({"val_f1": f1, "val_map50": map50})
-                print(f"  Trial {trial.number}: F1={f1:.4f}  mAP50={map50:.4f}")
+                for fold_i, fold_yaml in enumerate(fold_yamls):
+                    try:
+                        f1, map50 = run_fold(
+                            hp, args.epochs_per_trial, args.batch, device,
+                            fold_yaml, project, trial.number, fold_i,
+                        )
+                    except (RuntimeError, ValueError, OSError, cv2.error):
+                        traceback.print_exc()
+                        f1, map50 = 0.0, 0.0
 
-            return f1, map50
+                    fold_f1s.append(f1)
+                    fold_map50s.append(map50)
+                    mlflow.log_metrics({
+                        f"fold_{fold_i}_f1": f1,
+                        f"fold_{fold_i}_map50": map50,
+                    })
+                    print(f"    Fold {fold_i}: F1={f1:.4f}  mAP50={map50:.4f}")
+
+                avg_f1 = float(np.mean(fold_f1s))
+                avg_map50 = float(np.mean(fold_map50s))
+                std_f1 = float(np.std(fold_f1s, ddof=1)) if k > 1 else 0.0
+                std_map50 = float(np.std(fold_map50s, ddof=1)) if k > 1 else 0.0
+
+                mlflow.log_metrics({
+                    "avg_f1": avg_f1,
+                    "avg_map50": avg_map50,
+                    "std_f1": std_f1,
+                    "std_map50": std_map50,
+                })
+
+                print(
+                    f"  Trial {trial.number}: "
+                    f"avg_F1={avg_f1:.4f}+-{std_f1:.4f}  "
+                    f"avg_mAP50={avg_map50:.4f}+-{std_map50:.4f}"
+                )
+
+            return avg_f1, avg_map50
 
         study.optimize(objective, n_trials=args.n_trials)
 
-        save_pareto(study)
-
-        if PARETO_CSV.exists():
-            mlflow.log_artifact(str(PARETO_CSV))
+        save_pareto(study, pareto_csv)
+        if pareto_csv.exists():
+            mlflow.log_artifact(str(pareto_csv))
 
     print(f"\nDone. {len(study.trials)} total trials in study.")
     print(f"MLflow parent run: {parent_run.info.run_id}")
