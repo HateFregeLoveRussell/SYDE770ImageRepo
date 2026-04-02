@@ -42,3 +42,4 @@ data/derived/yolo/test/
 data/derived/yolo/folds/
 data/derived/yolo/trainval/
 data/derived/yolo/fold_indices.json
+/models
