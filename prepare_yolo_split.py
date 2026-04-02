@@ -25,10 +25,10 @@ import pandas as pd
 from sklearn.model_selection import train_test_split, StratifiedKFold
 
 REPO_ROOT = pathlib.Path(__file__).parent.resolve()
-IMAGES_DIR = REPO_ROOT / "data" / "images"
+IMAGES_DIR = REPO_ROOT / "data" / "augmented_dataset_v2" / "images"
 LABELS_FLAT = REPO_ROOT / "data" / "derived" / "yolo" / "labels"
 YOLO_DIR = REPO_ROOT / "data" / "derived" / "yolo"
-SAMPLES_PQ = REPO_ROOT / "data" / "index" / "samples.parquet"
+SAMPLES_PQ = REPO_ROOT / "data" / "augmented_dataset_v2" / "samples.parquet"
 
 def _rm_readonly(func, path, _exc_info):
     """Handle read-only files on Windows / OneDrive by forcing write permission."""
@@ -66,24 +66,25 @@ def copy_or_link(src: pathlib.Path, dst: pathlib.Path):
         shutil.copy2(src, dst)
 
 
-def find_image(key: str) -> pathlib.Path | None:
+def find_image(key: str, images_dir: pathlib.Path = IMAGES_DIR) -> pathlib.Path | None:
     """Locate the image file for a label key across common extensions."""
     for ext in (".jpg", ".jpeg", ".png", ".webp"):
-        candidate = IMAGES_DIR / (key + ext)
+        candidate = images_dir / (key + ext)
         if candidate.exists():
             return candidate
     return None
 
 
 def populate_split(
-    keys: list[str], img_dir: pathlib.Path, lbl_dir: pathlib.Path
+    keys: list[str], img_dir: pathlib.Path, lbl_dir: pathlib.Path,
+    images_dir: pathlib.Path = IMAGES_DIR,
 ) -> list[str]:
     """Copy/link images and labels into target dirs. Returns missing keys."""
     img_dir.mkdir(parents=True, exist_ok=True)
     lbl_dir.mkdir(parents=True, exist_ok=True)
     missing = []
     for key in keys:
-        img_src = find_image(key)
+        img_src = find_image(key, images_dir)
         if img_src is None:
             missing.append(key)
         else:
@@ -104,6 +105,10 @@ def parse_args():
                    help="Random seed for reproducibility (default: 42)")
     p.add_argument("--test-size", type=float, default=0.20,
                    help="Fraction held out for test (default: 0.20)")
+    p.add_argument("--images-dir", default=None,
+                   help="Override images directory (default: data/images)")
+    p.add_argument("--samples-pq", default=None,
+                   help="Override samples.parquet path")
     return p.parse_args()
 
 
@@ -111,6 +116,9 @@ def main():
     args = parse_args()
     k = args.k_folds
     seed = args.seed
+
+    images_dir = pathlib.Path(args.images_dir) if args.images_dir else IMAGES_DIR
+    samples_pq = pathlib.Path(args.samples_pq) if args.samples_pq else SAMPLES_PQ
 
     # ---- collect labelled keys ------------------------------------------------
     label_files = sorted(LABELS_FLAT.glob("*.txt"))
@@ -120,19 +128,32 @@ def main():
 
     keys = [f.stem for f in label_files]
     print(f"Found {len(keys)} labelled images.")
+    print(f"Images dir: {images_dir}")
+    print(f"Samples PQ: {samples_pq}")
 
     # ---- stratification labels ------------------------------------------------
-    df = pd.read_parquet(SAMPLES_PQ, columns=["image_key", "has_tim_bbox"])
+    # 3-way: 0=hard_negative (no cups), 1=non-tim cups, 2=tim hortons
+    df = pd.read_parquet(samples_pq, columns=["image_key", "has_tim_bbox", "n_det"])
     df["stem"] = (
         df["image_key"]
         .str.replace(r"^images/", "", regex=True)
         .str.replace(r"\.(jpg|jpeg|png|webp)$", "", regex=True)
     )
     key_to_tim = dict(zip(df["stem"], df["has_tim_bbox"]))
-    strat = [int(bool(key_to_tim.get(key, False))) for key in keys]
+    key_to_ndet = dict(zip(df["stem"], df["n_det"]))
 
-    tim_n = sum(strat)
-    print(f"  Tim Hortons : {tim_n}  |  Non-Tim : {len(strat) - tim_n}")
+    def strat_class(key):
+        n = key_to_ndet.get(key, 0)
+        if n == 0:
+            return 0  # hard negative
+        return 2 if key_to_tim.get(key, False) else 1
+
+    strat = [strat_class(key) for key in keys]
+
+    hn_n = strat.count(0)
+    nontim_n = strat.count(1)
+    tim_n = strat.count(2)
+    print(f"  Tim Hortons : {tim_n}  |  Non-Tim cups : {nontim_n}  |  Hard negatives : {hn_n}")
 
     # ---- 80/20 stratified split -----------------------------------------------
     tv_keys, test_keys, tv_strat, test_strat = train_test_split(
@@ -157,7 +178,8 @@ def main():
     # ---- held-out test set ----------------------------------------------------
     print("\nPopulating test set...")
     missing = populate_split(
-        test_keys, YOLO_DIR / "test" / "images", YOLO_DIR / "test" / "labels"
+        test_keys, YOLO_DIR / "test" / "images", YOLO_DIR / "test" / "labels",
+        images_dir=images_dir,
     )
     if missing:
         print(f"  WARNING: {len(missing)} test keys had no matching image")
@@ -175,6 +197,7 @@ def main():
         tv_keys,
         YOLO_DIR / "trainval" / "images" / "train",
         YOLO_DIR / "trainval" / "labels" / "train",
+        images_dir=images_dir,
     )
     if missing:
         print(f"  WARNING: {len(missing)} trainval keys had no matching image")
@@ -196,8 +219,10 @@ def main():
         fval = [tv_keys[i] for i in val_idx]
 
         fold_dir = YOLO_DIR / "folds" / f"fold_{fold_i}"
-        populate_split(ftrain, fold_dir / "images" / "train", fold_dir / "labels" / "train")
-        populate_split(fval, fold_dir / "images" / "val", fold_dir / "labels" / "val")
+        populate_split(ftrain, fold_dir / "images" / "train", fold_dir / "labels" / "train",
+                        images_dir=images_dir)
+        populate_split(fval, fold_dir / "images" / "val", fold_dir / "labels" / "val",
+                        images_dir=images_dir)
         write_data_yaml(
             fold_dir / "data.yaml", root=fold_dir, train="images/train", val="images/val"
         )
@@ -231,11 +256,17 @@ def main():
     print(f"Wrote {YOLO_DIR / 'data.yaml'}")
 
     # ---- sanity check ---------------------------------------------------------
+    test_hn = sum(1 for s in test_strat if s == 0)
+    test_nontim = sum(1 for s in test_strat if s == 1)
+    test_tim = sum(1 for s in test_strat if s == 2)
+    tv_hn = sum(1 for s in tv_strat if s == 0)
+    tv_nontim = sum(1 for s in tv_strat if s == 1)
+    tv_tim = sum(1 for s in tv_strat if s == 2)
     print("\n-- Sanity Check ---")
     print(f"  Test      : {len(test_keys)} images  "
-          f"(Tim={sum(test_strat)}, NonTim={len(test_strat) - sum(test_strat)})")
+          f"(Tim={test_tim}, NonTim={test_nontim}, HardNeg={test_hn})")
     print(f"  Train+CV  : {len(tv_keys)} images  "
-          f"(Tim={sum(tv_strat)}, NonTim={len(tv_strat) - sum(tv_strat)})")
+          f"(Tim={tv_tim}, NonTim={tv_nontim}, HardNeg={tv_hn})")
     for fold_i in range(k):
         fd = YOLO_DIR / "folds" / f"fold_{fold_i}"
         nt = len(list((fd / "images" / "train").iterdir()))
