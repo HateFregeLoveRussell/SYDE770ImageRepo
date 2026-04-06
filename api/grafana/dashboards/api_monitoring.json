@@ -55,22 +55,22 @@
       ]
     },
     {
-      "title": "Confidence Score Distribution",
-      "type": "histogram",
+      "title": "Confidence Score Distribution (by model)",
+      "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
-        "defaults": { "unit": "short" },
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 20 }
+        },
         "overrides": []
       },
-      "options": {
-        "bucketSize": 0.05,
-        "legend": { "displayMode": "list", "placement": "bottom" }
-      },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" } },
       "targets": [
         {
-          "expr": "rate(detection_confidence_bucket[5m])",
-          "legendFormat": "{{model_id}} - {{class_name}} - le={{le}}"
+          "expr": "avg_confidence",
+          "legendFormat": "avg conf - {{model_id}}"
         }
       ]
     },
@@ -95,19 +95,36 @@
       ]
     },
     {
-      "title": "Detection Class Balance",
+      "title": "Cup Detections by Model",
       "type": "piechart",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+      "gridPos": { "h": 8, "w": 4, "x": 0, "y": 16 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": {}, "overrides": [] },
       "options": {
-        "legend": { "displayMode": "table", "placement": "right" },
+        "legend": { "displayMode": "table", "placement": "bottom" },
         "pieType": "donut"
       },
       "targets": [
         {
-          "expr": "increase(detections_total[1h])",
-          "legendFormat": "{{model_id}} - {{class_name}}"
+          "expr": "detections_total{class_name='cup'}",
+          "legendFormat": "{{model_id}}"
+        }
+      ]
+    },
+    {
+      "title": "Timmies Detections by Model",
+      "type": "piechart",
+      "gridPos": { "h": 8, "w": 4, "x": 4, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom" },
+        "pieType": "donut"
+      },
+      "targets": [
+        {
+          "expr": "detections_total{class_name='timmies'}",
+          "legendFormat": "{{model_id}}"
         }
       ]
     },

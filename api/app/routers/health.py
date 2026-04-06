@@ -106,7 +106,7 @@ async def run_evaluation(request: Request):
     """Run ground truth evaluation on test set and publish to Prometheus gauges."""
     detector = request.app.state.detector
     repo_root = pathlib.Path(__file__).resolve().parents[3]
-    eval_yaml = repo_root / "data" / "eval_v2" / "data.yaml"
+    eval_yaml = repo_root / "data" / "eval_v2_split_actual" / "data.yaml"
 
     if not eval_yaml.exists():
         return {"error": "eval data.yaml not found. Run extract_test_images.py first."}
@@ -117,3 +117,32 @@ async def run_evaluation(request: Request):
     t = threading.Thread(target=bg, daemon=True)
     t.start()
     return {"message": "Evaluation started in background for all models. Check Grafana in ~5 minutes."}
+
+
+@router.post("/load-eval")
+async def load_eval_results(request: Request):
+    """Load pre-computed eval_results.json into Prometheus gauges (instant)."""
+    import json
+    repo_root = pathlib.Path(__file__).resolve().parents[3]
+    results_path = repo_root / "api" / "eval_results.json"
+
+    if not results_path.exists():
+        return {"error": "eval_results.json not found. Run yolo_eval.py first."}
+
+    with open(results_path) as f:
+        results = json.load(f)
+
+    for model_id, r in results.items():
+        MODEL_MAP50.labels(model_id=model_id).set(r["mAP50"])
+        MODEL_MAP50_95.labels(model_id=model_id).set(r["mAP50-95"])
+        MODEL_PRECISION.labels(model_id=model_id, class_name="overall").set(r["precision"])
+        MODEL_RECALL.labels(model_id=model_id, class_name="overall").set(r["recall"])
+        MODEL_F1.labels(model_id=model_id, class_name="overall").set(r["f1"])
+
+        for cls_name, cls_data in r.get("per_class_ap", {}).items():
+            MODEL_CLASS_AP50.labels(model_id=model_id, class_name=cls_name).set(cls_data["ap50"])
+            MODEL_CLASS_AP50_95.labels(model_id=model_id, class_name=cls_name).set(cls_data.get("ap50_95", cls_data.get("ap", 0)))
+            MODEL_PRECISION.labels(model_id=model_id, class_name=cls_name).set(cls_data["precision"])
+            MODEL_RECALL.labels(model_id=model_id, class_name=cls_name).set(cls_data["recall"])
+
+    return {"message": f"Loaded metrics for {len(results)} models into Prometheus.", "models": list(results.keys())}

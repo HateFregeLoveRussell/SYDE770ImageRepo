@@ -49,10 +49,10 @@ class DetectorService:
 
         # Explicit best-to-worst ordering (grading server tests top 2)
         preferred_order = [
-            "yolov8s_v2_extended",   # mAP50-95: 0.904, v2 dataset
-            "yolov8s_v2",            # mAP50-95: 0.897, v2 dataset
-            "yolov8s_v1_extended",   # mAP50-95: 0.904, v1 dataset
-            "yolov8s_v1",            # mAP50-95: 0.895, v1 dataset
+            "yolov8s_v2_extended",   # mAP50-95: 0.903, v2 dataset, default
+            "yolov8s_v1",            # mAP50-95: 0.936, v1 dataset
+            "yolov8s_v2",            # mAP50-95: 0.899, v2 dataset
+            "yolov8s_v1_extended",   # mAP50-95: 0.945, v1 dataset
         ]
         ordered = [m for m in preferred_order if m in self._models]
         remaining = [m for m in self._models if m not in set(ordered)]
