@@ -264,7 +264,7 @@ def main():
             f"path: {YOLO_DIR}\n"
             f"train: trainval/images/train\n"
             f"val: trainval/images/train\n\n"
-            f"nc: 2\nnames:\n  0: NonTimHortonsCup\n  1: TimHortonsCup\n"
+            f"nc: 2\nnames:\n  0: cup\n  1: timmies\n"
         )
 
         model = YOLO(model_name)

@@ -26,7 +26,7 @@ import pathlib
 import pandas as pd
 from ultralytics import YOLO
 
-CLASS_NAMES = {0: "NonTimHortonsCup", 1: "TimHortonsCup"}
+CLASS_NAMES = {0: "cup", 1: "timmies"}
 
 
 def parse_args():
@@ -153,7 +153,7 @@ def main():
     det_rows = []
     if len(df) > 0:
         for _, row in df.iterrows():
-            is_tim = row["label"] == "TimHortonsCup"
+            is_tim = row["label"] == "timmies"
             area = (row["w_pct"] / 100.0) * (row["h_pct"] / 100.0)
             det_rows.append({
                 "sample_id": row["sample_id"],
@@ -182,7 +182,7 @@ def main():
         img_dets = df[df["sample_id"] == img_id] if len(df) > 0 else pd.DataFrame()
         n_det = len(img_dets)
         n_cup = n_det
-        has_tim = bool((img_dets["label"] == "TimHortonsCup").any()) if n_det > 0 else False
+        has_tim = bool((img_dets["label"] == "timmies").any()) if n_det > 0 else False
         cup_areas = (
             ((img_dets["w_pct"] / 100.0) * (img_dets["h_pct"] / 100.0)).tolist()
             if n_det > 0 else []
@@ -197,8 +197,8 @@ def main():
             "max_cup_area": max(cup_areas) if cup_areas else 0.0,
             "sum_cup_area": sum(cup_areas) if cup_areas else 0.0,
             "cup_area_frac": max(cup_areas) if cup_areas else 0.0,
-            "cup_class": "TimHortonsCup" if has_tim else (
-                "NonTimHortonsCup" if n_cup > 0 else pd.NA),
+            "cup_class": "timmies" if has_tim else (
+                "cup" if n_cup > 0 else pd.NA),
         })
     samples_df = pd.DataFrame(pred_stats)
 

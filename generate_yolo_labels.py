@@ -8,8 +8,8 @@ YOLO format per line:  class_id  center_x  center_y  width  height
 All values normalised to [0, 1].
 
 Class mapping:
-  0 = NonTimHortonsCup  (label == "Cup")
-  1 = TimHortonsCup     (label == "Tim Hortons")
+  0 = cup      (label == "Cup")
+  1 = timmies   (label == "Tim Hortons")
 
 Usage:
   python generate_yolo_labels.py                      # defaults

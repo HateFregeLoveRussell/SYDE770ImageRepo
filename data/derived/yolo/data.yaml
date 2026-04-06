@@ -5,5 +5,5 @@ val: test/images
 
 nc: 2
 names:
-  0: NonTimHortonsCup
-  1: TimHortonsCup
+  0: cup
+  1: timmies

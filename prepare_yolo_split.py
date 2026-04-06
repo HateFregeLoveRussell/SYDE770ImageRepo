@@ -39,8 +39,8 @@ def _rm_readonly(func, path, _exc_info):
 YAML_CLASSES = """\
 nc: 2
 names:
-  0: NonTimHortonsCup
-  1: TimHortonsCup
+  0: cup
+  1: timmies
 """
 
 
