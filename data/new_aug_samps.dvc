@@ -1,0 +1,6 @@
+outs:
+- md5: 54b059a160f780ddea1b405348101672.dir
+  size: 32600820
+  nfiles: 55
+  hash: md5
+  path: new_aug_samps
