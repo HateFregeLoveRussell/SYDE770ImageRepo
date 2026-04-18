@@ -1,0 +1,6 @@
+outs:
+- md5: 924580457b7e45e0bb4332b017c8b373.dir
+  size: 32696195
+  nfiles: 55
+  hash: md5
+  path: augmented_samples_for_v3
