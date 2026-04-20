@@ -228,7 +228,7 @@ def _parse_task(task: Dict[str, Any], images_root: Path) -> ParsedSample:
         "has_tim_bbox": bool(has_tim_bbox),
 
         # optional “best guess” class; feel free to recompute later in your cleaning stage
-        "cup_class": ("TimHortonsCup" if has_tim_bbox else ("NonTimHortonsCup" if n_cup > 0 else pd.NA)),
+        "cup_class": ("timmies" if has_tim_bbox else ("cup" if n_cup > 0 else pd.NA)),
     }
 
     return ParsedSample(sample_row=sample_row, det_rows=det_rows)

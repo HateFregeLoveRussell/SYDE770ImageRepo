@@ -53,8 +53,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
     # Output class names
     "cup_class_names": {
-        "tim": "TimHortonsCup",
-        "non_tim": "NonTimHortonsCup",
+        "tim": "timmies",
+        "non_tim": "cup",
     },
 }
 

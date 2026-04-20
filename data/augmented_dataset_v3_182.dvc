@@ -1,0 +1,6 @@
+outs:
+- md5: 30913763d09f5f6fb83e626819ea5694.dir
+  size: 3692344513
+  nfiles: 4390
+  hash: md5
+  path: augmented_dataset_v3_182

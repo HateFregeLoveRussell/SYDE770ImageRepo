@@ -117,7 +117,7 @@ def pct_bbox_to_rel(x_pct: float, y_pct: float, w_pct: float, h_pct: float):
 
 
 def build_detection_label(row: pd.Series) -> str:
-    return "TimHortonsCup" if bool(row.get("is_tim", False)) else "NonTimHortonsCup"
+    return "timmies" if bool(row.get("is_tim", False)) else "cup"
 
 
 def parse_args():
@@ -152,7 +152,7 @@ def main():
             sample_id = row.sample_id
 
             bbox = pct_bbox_to_rel(row.x_pct, row.y_pct, row.w_pct, row.h_pct)
-            label = "TimHortonsCup" if bool(row.is_tim) else "NonTimHortonsCup"
+            label = "timmies" if bool(row.is_tim) else "cup"
 
             det = fo.Detection(
                 label=label,

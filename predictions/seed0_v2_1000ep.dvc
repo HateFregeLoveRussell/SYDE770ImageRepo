@@ -1,0 +1,6 @@
+outs:
+- md5: 36d9176c9fdfed9db20280e38a496a4d.dir
+  size: 449896
+  nfiles: 885
+  hash: md5
+  path: seed0_v2_1000ep

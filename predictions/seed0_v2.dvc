@@ -1,0 +1,6 @@
+outs:
+- md5: ec6ae792607b109683afb141a64a5728.dir
+  size: 450574
+  nfiles: 885
+  hash: md5
+  path: seed0_v2
