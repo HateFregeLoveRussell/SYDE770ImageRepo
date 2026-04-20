@@ -10,8 +10,8 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 class Settings(BaseSettings):
     models_dir: pathlib.Path = _REPO_ROOT / "models"
-    default_model: str = "yolov8s_v2_extended"
-    default_conf: float = 0.25
+    default_model: str = "yolov8s_v3_260"
+    default_conf: float = 0.40
     default_iou: float = 0.7
     img_size: int = 640
     batch_size: int = 16
