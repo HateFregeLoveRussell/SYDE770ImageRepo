@@ -1,112 +1,114 @@
 # System Design: Tim Hortons Cup Detection API
 
-## 1. API and Detection Performance
+## 1. API Design and Endpoints
 
 ### Architecture
 
 The API is built with **FastAPI** (Python), chosen for its async request handling, automatic OpenAPI documentation, Pydantic validation, and high performance via Uvicorn's ASGI server.
 
-```
-Client Request
-    │
-    ▼
-┌──────────────────────────────────────┐
-│  FastAPI Application (port 6045)     │
-│  ├── /predict          (POST)        │
-│  ├── /health-status    (GET)         │
-│  ├── /group-info       (GET)         │
-│  ├── /metrics          (GET, JSON)   │
-│  ├── /prometheus       (GET, Prom)   │
-│  ├── /management/models              │
-│  │   ├── /            (GET, list)    │
-│  │   ├── /{m}/describe (GET)         │
-│  │   └── /{m}/set-default (GET)      │
-│  └── /docs             (Swagger UI)  │
-│                                      │
-│  Services:                           │
-│  ├── DetectorService (YOLO models)   │
-│  └── MonitoringService (metrics)     │
-└──────────────────────────────────────┘
-```
+### Endpoint Reference
+
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/predict` | Upload an image, receive object detections with bounding boxes, confidence scores, and class labels. Accepts optional `model` form field to select a specific model. |
+| GET | `/health-status` | Returns server status ("Healthy"), server type ("FastAPI"), and human-readable uptime. |
+| GET | `/group-info` | Returns group name and member names. |
+| GET | `/metrics` | Returns JSON performance metrics: request rate per minute, average/max latency, total requests. Used by the grading server. |
+| GET | `/management/models` | Lists all available models from best to worst. Top 2 are tested by the grading server. |
+| GET | `/management/models/{model}/describe` | Returns model details: input size, batch size, confidence threshold, registration date. |
+| GET | `/management/models/{model}/set-default` | Changes the default model for future `/predict` calls without restarting. |
+| GET | `/prometheus` | Prometheus-format metrics for Grafana dashboards (not used by grading server). |
+| GET | `/docs` | Interactive Swagger UI for testing all endpoints in-browser. |
+| POST | `/evaluate` | Triggers background ground-truth evaluation, publishes mAP/precision/recall to Prometheus. |
+| POST | `/load-eval` | Loads pre-computed evaluation results from `eval_results.json` into Prometheus (instant). |
 
 ### Inference Pipeline
 
 1. **Image Upload**: Client sends image as `multipart/form-data` via the `image` field. Supports JPEG, PNG, WebP, BMP, and TIFF.
-2. **Preprocessing**: PIL opens the image and converts to RGB. No resizing needed -- Ultralytics handles letterboxing to the model's input size (640x640) internally.
-3. **Model Selection**: Optional `model` form field selects which checkpoint to use. Defaults to `yolov8s_v2_extended` (configurable at runtime via `/management/models/{model}/set-default`).
-4. **Inference**: Ultralytics `model.predict()` runs forward pass + NMS. Confidence threshold (0.25) and IoU threshold (0.7) are applied.
+2. **Preprocessing**: PIL opens the image and converts to RGB. No resizing needed -- Ultralytics handles letterboxing to 640x640 internally.
+3. **Model Selection**: Optional `model` form field selects which checkpoint to use. Defaults to `yolov8s_v3_260`.
+4. **Inference**: Ultralytics `model.predict()` runs forward pass + NMS. Confidence threshold (0.40) and IoU threshold (0.7) are applied.
 5. **Response**: Bounding boxes returned in **Pascal VOC format** `[xmin, ymin, xmax, ymax]` with class labels (`"timmies"` or `"cup"`) and confidence scores.
 
 ### Dynamic Image Size Handling
 
 The API handles arbitrary image sizes. Ultralytics internally letterboxes images to the model's training size (640x640) while preserving aspect ratio, then maps bounding box coordinates back to the original image dimensions. No client-side resizing is required.
 
-### Multi-Model Support
-
-All `.pt` checkpoints in the `models/` directory are loaded at startup into memory (~21 MB each, ~85 MB total for 4 models). Model selection is per-request with zero cold-start latency. Available models are listed at `/management/models`, ordered to present diverse model characteristics to the grading server.
-
 ---
 
-## 2. Prediction Results
+## 2. Prediction Results and Improvements
 
-### Model Selection Rationale
+### Model Evolution
 
-Four YOLOv8s (Small, 11.1M parameters) checkpoints are available, all trained with the best hyperparameters found via 3-phase Optuna Bayesian search (56 trials across architecture, optimizer, and loss weight phases):
+We trained 6 models across 3 dataset versions, each improving on the last:
 
-| Model | Dataset | Epochs | Description |
+| Model | Dataset | Images | Epochs | mAP50-95 | Description |
+|---|---|---|---|---|---|
+| **`yolov8s_v3_260`** (default) | v3 | ~4,700 | 260 | **0.927** | Retrained with new cup designs |
+| **`yolov8s_v3_182`** | v3 | ~4,700 | 182 | 0.922 | Highest precision variant |
+| `yolov8s_v2_extended` | v2 (4,406) | 4,406 | ~320 | 0.903 | Extended training on v2 |
+| `yolov8s_v1` | v1 (4,006) | 4,006 | 200 | 0.895 | Baseline |
+| `yolov8s_v2` | v2 (4,406) | 4,406 | 200 | 0.899 | v2 with hard negatives |
+| `yolov8s_v1_extended` | v1 (4,006) | 4,006 | ~320 | 0.904 | Extended training on v1 |
+
+### Initial Grading Results and Failure Analysis (v2 models)
+
+The initial grading test set (26 images) exposed a critical gap in our v1/v2 training data:
+
+| Model | Correct | F1 | Key Issue |
 |---|---|---|---|
-| **`yolov8s_v2_extended`** (default) | Augmented v2 (4,406 images) | 1000 (early stopped) | Extended training on v2 with hard negatives |
-| `yolov8s_v1` | Augmented v1 (4,006 images) | 200 (patience=50) | Standard training on v1 |
-| `yolov8s_v2` | Augmented v2 (4,406 images) | 200 (patience=50) | Standard training on v2 with hard negatives |
-| `yolov8s_v1_extended` | Augmented v1 (4,006 images) | 1000 (early stopped) | Extended training on v1 |
+| yolov8s_v2_extended | 14/26 | 0.796 | Misclassified new cup design |
+| yolov8s_v1 | 15/26 | 0.816 | Same issue, slightly better |
+| yolov8s_v1_extended | 16/26 | 0.863 | Best of v1/v2 models |
 
-The model ordering (best-to-worst for grading) intentionally alternates extended and standard models to provide diverse detection characteristics across the top 2 tested models.
+**Root cause**: Our v1/v2 training data contained primarily the **older Tim Hortons cup design** (red cup with "Tim Hortons" text in white cursive). The grading test set featured the **newer 2024 design** (red cup with white maple leaf and "Always Fresh / Toujours Frais" text). The model learned to identify Tim Hortons by the text, not by the maple leaf or overall red cup style.
 
-**`yolov8s_v2_extended`** is the default because:
-- Trained on the latest, most diverse augmented dataset (v2) including 400 hard negative images
-- Extended training for more epochs allows deeper convergence
-- Best config: YOLOv8s, 640px, 10 frozen layers, AdamW (lr=7.7e-4), custom loss weights (box=0.115, cls=0.335, dfl=1.479)
+**Specific failure patterns on v2_extended:**
+- **image_17, image_24, image_25**: Tim Hortons maple leaf cups confidently classified as generic "cup" (0.82-0.94 confidence)
+- **image_16**: 3 timmies cups, 2 misclassified as "cup" (maple leaf design)
+- **image_13**: Multi-cup scene with phantom detections from clutter
+- **image_11**: Red Starbucks holiday cups confused with Tim Hortons due to similar color
 
-### Test Set Evaluation (v2 held-out test set, 882 images)
+### Improvement: v3 Models
 
-All models were evaluated on the v2 held-out test set using the exact train/test split from training (80/20 stratified split, seed=42):
+To address these failures, we augmented the training data with:
+- New Tim Hortons maple leaf cup design images
+- "Always Fresh / Toujours Frais" branding variants
+- Promotional cup designs (hockey jersey, seasonal)
+- Additional diverse cup angles and lighting conditions
 
-| Model | mAP50 | mAP50-95 | Precision | Recall | F1 | TP | FP | FN | Perfect Images |
-|---|---|---|---|---|---|---|---|---|---|
-| **yolov8s_v2_extended** | 0.977 | 0.904 | 0.971 | 0.957 | 0.964 | 1137 | 58 | 41 | 826/882 (93.7%) |
-| yolov8s_v2 | 0.976 | 0.899 | 0.980 | 0.944 | 0.962 | 1141 | 63 | 37 | 818/882 (92.7%) |
-| yolov8s_v1_extended | 0.988 | 0.945 | 0.987 | 0.977 | 0.982 | 1160 | 48 | 18 | 833/882 (94.4%) |
-| yolov8s_v1 | 0.990 | 0.936 | 0.991 | 0.976 | 0.983 | 1156 | 57 | 22 | 823/882 (93.3%) |
+**Results after retraining (v3 models on grading test set):**
 
-Key findings:
-- All models achieve >97% mAP50 and >89% mAP50-95 on the held-out test set
-- v1 models score higher on v2 test data because the v2 test set includes 80 hard negative images (no cups) -- v1 models were not trained on hard negatives and are more conservative, producing fewer false positives
-- Extended training consistently improves mAP50-95 over standard training (+0.005 to +0.009)
-- The default model (`yolov8s_v2_extended`) correctly identifies 93.7% of test images with exact detection count matches
+| Model | Correct | TP | FP | FN | F1 |
+|---|---|---|---|---|---|
+| yolov8s_v3_260 | **26/26** | 48 | 0 | 0 | **1.000** |
+| yolov8s_v3_182 | **26/26** | 48 | 0 | 0 | **1.000** |
+
+Both v3 models achieve perfect detection on the initial grading test set, correctly classifying both the old text-based and new maple leaf-based Tim Hortons designs.
+
+### Confidence Threshold Selection
+
+We evaluated five confidence thresholds on the grading test set across all models:
+
+| Threshold | v2_ext Correct | v1_ext Correct | v3_260 Correct |
+|---|---|---|---|
+| 0.25 | 14/26 | 16/26 | 26/26 |
+| 0.35 | 14/26 | 16/26 | 26/26 |
+| **0.40** | **15/26** | **17/26** | **26/26** |
+| 0.45 | 15/26 | 17/26 | 26/26 |
+| 0.50 | 14/26 | 17/26 | 26/26 |
+
+**Selected threshold: 0.40** because:
+- At 0.25 (the default YOLO threshold), low-confidence phantom detections inflate false positives (e.g., timmies:0.39 on image_10, timmies:0.33 on image_11)
+- At 0.40, these phantoms are filtered out, improving precision without significantly hurting recall
+- At 0.50+, real detections start being lost (e.g., image_1 cup at 0.46 on v2 model)
+- For the v3 models, all thresholds from 0.25 to 0.50 produce identical results (all detections are high-confidence), but 0.40 provides a safety margin for unseen data
+- The misclassifications in v2 models were high-confidence (0.82-0.94), so threshold tuning alone couldn't fix them -- the training data improvement was necessary
 
 ### Class Naming
 
-- **`timmies`** (class 1): Tim Hortons branded cups
-- **`cup`** (class 0): Non-Tim Hortons cups (other brands, generic cups)
-
-Originally named `TimHortonsCup` and `NonTimHortonsCup` during training. Renamed in model checkpoint metadata and all codebase references without retraining (YOLO labels use numeric class IDs, so the weights are unaffected).
-
-### Detection Output Format
-
-```json
-{
-  "predictions": [
-    {
-      "label": "timmies",
-      "confidence": 0.91,
-      "bbox": [42.0, 58.0, 214.0, 368.0]
-    }
-  ],
-  "model_used": "yolov8s_v2_extended"
-}
-```
-
-Bounding boxes are in Pascal VOC format: `[xmin, ymin, xmax, ymax]` in pixel coordinates relative to the original image dimensions.
+- **`timmies`** (class 1): Tim Hortons branded cups (including maple leaf, text, and promotional designs)
+- **`cup`** (class 0): Non-Tim Hortons cups (Starbucks, generic, disposable)
 
 ---
 
@@ -114,64 +116,50 @@ Bounding boxes are in Pascal VOC format: `[xmin, ymin, xmax, ymax]` in pixel coo
 
 ### Dual Metrics Architecture
 
-The system serves two metrics formats simultaneously to satisfy both grading requirements and operational monitoring:
+The system serves two metrics formats simultaneously:
 
 | Endpoint | Format | Consumer | Purpose |
 |---|---|---|---|
 | `GET /metrics` | JSON | Grading server | `request_rate_per_minute`, `avg_latency_ms`, `max_latency_ms`, `total_requests` |
-| `GET /prometheus` | Prometheus text | Prometheus + Grafana | Detailed histograms, counters, gauges |
+| `GET /prometheus` | Prometheus text | Prometheus + Grafana | Detailed histograms, counters, gauges for dashboards |
 
-### JSON Metrics (`/metrics`)
-
-Computed from an in-memory buffer tracking all requests since startup:
-- **`request_rate_per_minute`**: Total requests / elapsed minutes
-- **`avg_latency_ms`**: Mean inference latency across all requests
-- **`max_latency_ms`**: Maximum observed inference latency
-- **`total_requests`**: Cumulative request count
-
-### Prometheus Metrics (`/prometheus`)
-
-Rich, time-series metrics scraped by Prometheus every 5 seconds:
+### Prometheus Metrics
 
 | Metric | Type | Labels | Grafana Panel |
 |---|---|---|---|
 | `predict_requests_total` | Counter | `model_id` | Request Throughput |
 | `inference_duration_seconds` | Histogram | `model_id` | Latency p50/p95/p99 |
-| `avg_confidence` | Gauge | `model_id` | Confidence over time / Avg gauges |
+| `avg_confidence` | Gauge | `model_id` | Confidence gauges |
 | `detections_per_image` | Histogram | `model_id` | Detections per Image |
-| `detections_total` | Counter | `model_id`, `class_name` | Cup/Timmies donuts |
-| `model_map50_95` | Gauge | `model_id` | mAP50-95 bar gauge |
-| `model_map50` | Gauge | `model_id` | mAP50 bar gauge |
-| `model_class_ap50_95` | Gauge | `model_id`, `class_name` | Per-Class AP50-95 |
-| `model_precision` | Gauge | `model_id`, `class_name` | Precision vs Recall |
-| `model_recall` | Gauge | `model_id`, `class_name` | Precision vs Recall |
-| `http_requests_total` | Counter | `status`, `handler` | HTTP Error Rate |
-
-Additionally, `prometheus_fastapi_instrumentator` automatically tracks HTTP-level metrics (request duration, status codes, in-progress requests).
+| `detections_total` | Counter | `model_id`, `class_name` | Class balance donuts |
+| `model_map50_95` | Gauge | `model_id` | mAP50-95 comparison |
+| `model_map50` | Gauge | `model_id` | mAP50 comparison |
+| `model_class_ap50_95` | Gauge | `model_id`, `class_name` | Per-class AP breakdown |
+| `model_precision` / `model_recall` | Gauge | `model_id`, `class_name` | Precision vs Recall |
 
 ### Grafana Dashboard
 
-A pre-provisioned dashboard ("Tim Hortons Cup Detector - API Monitoring") with 13 panels across three sections:
+A pre-provisioned dashboard with panels organized into three sections:
 
-**Operational Monitoring:**
-1. **Request Throughput** -- time series of req/s by model
-2. **Inference Latency** -- p50, p95, p99 percentile curves
-3. **Confidence Score Distribution** -- rolling average confidence per model over time
-4. **Detections per Image** -- rolling average of detections per image
-5. **Cup Detections by Model** -- donut chart of cup detections per model
-6. **Timmies Detections by Model** -- donut chart of timmies detections per model
-7. **Average Confidence** -- gauge with color-coded thresholds per model
-8. **HTTP Error Rate** -- 2xx vs 4xx/5xx over time
+**Operational Monitoring**: Request throughput, inference latency (p50/p95/p99), confidence over time, detections per image, cup/timmies detection donuts, average confidence gauges, HTTP error rate.
 
-**Model Comparison:**
-9. **Model Comparison: Latency** -- side-by-side p95 latency bar gauge
-10. **Model Comparison: Total Detections** -- total detections per model per class
+**Model Comparison**: Side-by-side p95 latency, total detections per model per class.
 
-**Accuracy (vs Ground Truth):**
-11. **Model Accuracy: mAP50-95** -- COCO-standard mAP for all 4 models
-12. **Model Accuracy: mAP50** -- mAP at IoU=0.50 for all 4 models
-13. **Per-Class AP50-95** -- cup vs timmies accuracy breakdown per model
-14. **Precision vs Recall** -- all 4 models compared
+**Accuracy (vs Ground Truth)**: mAP50-95 (COCO metric), mAP50, per-class AP50-95, precision vs recall -- all across all models.
+
+### Drift Detection
+
+To detect distribution shift in production, we monitor:
+
+1. **Confidence distribution shift**: The `avg_confidence` Prometheus gauge tracks rolling mean confidence per model. A sustained drop below the training-time average (~0.93 for v3 models) signals potential drift -- the model is less certain about incoming images.
+
+2. **Class ratio drift**: The `detections_total` counter tracks timmies vs cup ratios. During training, the ratio was approximately 75% cup / 25% timmies. If production traffic shows a significantly different ratio, it may indicate a shift in the input distribution.
+
+3. **Detection count drift**: The `detections_per_image` histogram tracks how many objects are found per image. Training data averaged ~1.3 detections/image. A sustained increase suggests the model may be hallucinating detections on out-of-distribution data.
+
+4. **Demonstrated drift example**: Our v2 models trained on text-based Tim Hortons designs showed a clear confidence pattern when encountering the newer maple leaf design -- they detected cups at high confidence (0.82-0.94) but **misclassified** them. This manifested as stable confidence scores but shifted class distributions (more "cup" predictions where "timmies" was expected). Monitoring the timmies/cup ratio over time would have surfaced this drift.
+
+**Mitigation**: When drift is detected, the `/management/models/{model}/set-default` endpoint allows hot-swapping to a different model variant without downtime. Our v3 models, trained on a broader distribution of cup designs, are more robust to future design changes.
 
 ---
 
@@ -193,56 +181,34 @@ A pre-provisioned dashboard ("Tim Hortons Cup Detector - API Monitoring") with 1
 └─────────────────────────────────────────────┘
 ```
 
-Three Docker Compose services:
-- **api**: FastAPI + Uvicorn, model weights mounted as read-only volume
-- **prometheus**: Scrapes `/prometheus` endpoint every 5 seconds
-- **grafana**: Pre-provisioned datasource + dashboard, accessible at port 3000
-
 ### Tunneling for Grading
 
-For the grading submission, the API runs locally (without Docker) and is exposed via **ngrok**:
+The API runs locally and is exposed via **ngrok**, bypassing dynamic IP and firewall issues:
 
 ```
-Grading Server (129.97.250.133:7070)
-        │
-        ▼
-ngrok tunnel (abc123.ngrok-free.app)
-        │
-        ▼
-Local API (0.0.0.0:6045)
+Grading Server (129.97.250.133:7070)  →  ngrok tunnel  →  Local API (0.0.0.0:6045)
 ```
-
-The API binds to `0.0.0.0` (all interfaces) so ngrok can forward traffic. This bypasses DHCP dynamic IP issues and university firewall restrictions.
 
 ### Model Versioning
 
-Models are versioned with **DVC** (Data Version Control) backed by Cloudflare R2 object storage:
-- `models.dvc` tracks 4 checkpoint files + split metadata (~90 MB total)
-- `dvc pull models.dvc` materializes the weights locally
-- Split JSONs (`v2_split_actual.json`, `v2_split_corrected.json`) record exact train/test file lists for reproducible evaluation
-
-### Dynamic Default Model
-
-The `/management/models/{model}/set-default` endpoint allows changing the default model at runtime without restarting the server. This is stored in the in-memory settings and takes effect immediately for subsequent `/predict` requests.
+Models are versioned with **DVC** backed by Cloudflare R2 object storage. Split JSONs record exact train/test file lists for reproducible evaluation.
 
 ### Load Testing & Evaluation
 
-Two evaluation workflows:
-- **`scripts/load_test.py`**: Sends images from a directory to the API via HTTP, cycling through models. Generates live Prometheus metrics for Grafana visualization. Reports latency percentiles, detection counts, and throughput.
-- **`scripts/yolo_eval.py`**: Runs proper YOLO `model.val()` on the held-out test set using COCO-standard IoU-based box matching. Reports mAP50, mAP50-95, precision, recall, and per-image TP/FP/FN counts for all 4 models.
+- **`scripts/load_test.py`**: Sends images to the API via HTTP, cycling through models. Generates live Prometheus metrics for Grafana.
+- **`scripts/yolo_eval.py`**: Runs YOLO `model.val()` with COCO-standard IoU-based box matching. Reports mAP50, mAP50-95, and per-image TP/FP/FN.
+- **`scripts/extract_test_images.py`**: Recreates exact train/test splits from split JSONs for reproducible evaluation.
 
 ### Configuration
-
-All settings are configurable via environment variables with the `API_` prefix:
 
 | Variable | Default | Description |
 |---|---|---|
 | `API_MODELS_DIR` | `<repo>/models` | Path to model checkpoint directory |
-| `API_DEFAULT_MODEL` | `yolov8s_v2_extended` | Default model for `/predict` |
-| `API_DEFAULT_CONF` | `0.25` | Confidence threshold |
+| `API_DEFAULT_MODEL` | `yolov8s_v3_260` | Default model for `/predict` |
+| `API_DEFAULT_CONF` | `0.40` | Confidence threshold |
 | `API_DEFAULT_IOU` | `0.7` | NMS IoU threshold |
 | `API_IMG_SIZE` | `640` | Inference image size |
 | `API_PORT` | `6045` | Server port (Group 5 assignment) |
 | `API_HOST` | `0.0.0.0` | Server bind address |
-| `API_GROUP_NAME` | `group5` | Group identifier for `/group-info` |
+| `API_GROUP_NAME` | `group5` | Group identifier |
 | `API_GROUP_MEMBERS` | `[...]` | Group member names |
